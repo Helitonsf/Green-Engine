@@ -1,0 +1,9 @@
+{
+  "name": "green-engine-v6.3.16-cf",
+  "version": "6.3.16",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "wrangler": "^4.122.0"
+  }
+}

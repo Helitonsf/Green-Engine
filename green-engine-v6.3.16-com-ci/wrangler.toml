@@ -1,0 +1,19 @@
+name = "green-engine-v6-3-15-cf"
+main = "worker/index.js"
+compatibility_date = "2026-08-12"
+
+preview_urls = false
+
+[assets]
+directory = "./public"
+
+[secrets]
+required = ["SPORTMONKS_API_TOKEN"]
+
+# ALLOWED_ORIGINS (opcional): lista de origens separadas por vírgula que podem
+# chamar a API a partir do navegador em domínios diferentes do próprio worker
+# (ex.: "https://greenengine.com.br,https://app.greenengine.com.br").
+# O dashboard embutido em /public NÃO precisa disso — ele chama /api/* pela
+# mesma origem. Deixe vazio/comentado se ninguém mais consome a API.
+# [vars]
+# ALLOWED_ORIGINS = ""
