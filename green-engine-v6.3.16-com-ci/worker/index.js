@@ -145,23 +145,73 @@ async function sports(url, env) {
     }, 400);
   }
 
-  const endpoint =
+  const baseEndpoint =
     `https://api.sportmonks.com/v3/football/fixtures/date/${date}` +
-    `?api_token=${encodeURIComponent(env.SPORTMONKS_API_TOKEN)}&per_page=50` +
+    `?api_token=${encodeURIComponent(env.SPORTMONKS_API_TOKEN)}` +
+    `&per_page=50&page=1` +
+    `&timezone=America/Sao_Paulo` +
     `&include=participants`;
 
-  const result = await fetchSportMonksJson(endpoint);
+  const firstResult = await fetchSportMonksJson(baseEndpoint);
 
-  if (!result.ok) {
+  if (!firstResult.ok) {
     return json({
-      error: result.status === 504
-        ? result.data.error
+      error: firstResult.status === 504
+        ? firstResult.data.error
         : "SportMonks retornou um erro.",
-      details: result.data
-    }, result.status);
+      details: firstResult.data
+    }, firstResult.status);
   }
 
-  return json(result.data, 200);
+  const firstData = firstResult.data || {};
+  const allFixtures = Array.isArray(firstData.data)
+    ? [...firstData.data]
+    : [];
+  const pagination = firstData.meta?.pagination || {};
+  const lastPage = Number(pagination.last_page || 1);
+
+  // O endpoint é paginado (máx. 50 por página). Reunimos todas as páginas
+  // disponíveis para que o seletor diário não fique limitado à primeira.
+  for (let page = 2; page <= lastPage && page <= 20; page += 1) {
+    const pageEndpoint =
+      `https://api.sportmonks.com/v3/football/fixtures/date/${date}` +
+      `?api_token=${encodeURIComponent(env.SPORTMONKS_API_TOKEN)}` +
+      `&per_page=50&page=${page}` +
+      `&timezone=America/Sao_Paulo` +
+      `&include=participants`;
+
+    const pageResult = await fetchSportMonksJson(pageEndpoint);
+
+    if (!pageResult.ok) {
+      return json({
+        error: pageResult.status === 504
+          ? pageResult.data.error
+          : "SportMonks retornou um erro ao paginar os jogos.",
+        details: pageResult.data
+      }, pageResult.status);
+    }
+
+    const pageFixtures = Array.isArray(pageResult.data?.data)
+      ? pageResult.data.data
+      : [];
+
+    allFixtures.push(...pageFixtures);
+  }
+
+  return json({
+    ...firstData,
+    data: allFixtures,
+    meta: {
+      ...(firstData.meta || {}),
+      pagination: {
+        ...(pagination || {}),
+        total: allFixtures.length,
+        current_page: 1,
+        last_page: lastPage,
+        has_more: false
+      }
+    }
+  }, 200);
 }
 
 async function fixture(url, env) {
