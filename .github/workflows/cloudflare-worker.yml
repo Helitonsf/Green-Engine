@@ -37,6 +37,7 @@ jobs:
           node --check cloudflare/history-core.js &&
           node --check cloudflare/providers/api-football.js &&
           node --check cloudflare/providers/api-football-history.js &&
+          node --check cloudflare/providers/league-catalog.js &&
           node --check worker/index.js
 
       - name: Deploy Worker to Cloudflare
