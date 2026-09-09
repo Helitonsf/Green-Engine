@@ -701,7 +701,7 @@ function normalizeHistoryOutput(history) {
   };
 }
 
-function normalizeGreenScoreOutput(score) {
+export function normalizeGreenScoreOutput(score) {
   const markets = Array.isArray(score?.markets) ? score.markets.map(m => ({
     market: m.market ?? null,
     probability: Number.isFinite(Number(m.probability)) ? Number(m.probability) : null,
@@ -900,7 +900,7 @@ direction === "over"
   return output;
 }
 
-function calculateGreenScore(home, away, homeVenueMatches = [], awayVenueMatches = []) {
+export function calculateGreenScore(home, away, homeVenueMatches = [], awayVenueMatches = []) {
   const required = Math.min(home.sampleSize || 0, away.sampleSize || 0);
 
   if (required < 5) {
