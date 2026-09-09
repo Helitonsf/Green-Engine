@@ -49,6 +49,136 @@
     gamesList.innerHTML = "";
   }
 
+  const filterWrap = document.createElement("div");
+  filterWrap.className = "green-engine-league-filters";
+  filterWrap.style.cssText = "display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:10px 0 12px;";
+
+  const genderSelect = document.createElement("select");
+  genderSelect.id = "gameGenderFilter";
+  genderSelect.setAttribute("aria-label", "Filtrar por gênero");
+  genderSelect.innerHTML = `
+    <option value="all">Todos os gêneros</option>
+    <option value="male">Masculino</option>
+    <option value="female">Feminino</option>
+  `;
+
+  const leagueSelect = document.createElement("select");
+  leagueSelect.id = "gameLeagueFilter";
+  leagueSelect.setAttribute("aria-label", "Filtrar por liga");
+  leagueSelect.innerHTML = `<option value="all">Todas as ligas úteis</option>`;
+
+  [genderSelect, leagueSelect].forEach(select => {
+    select.style.cssText = "width:100%;padding:8px 10px;border-radius:8px;background:rgba(255,255,255,.06);color:#fff;border:1px solid rgba(255,255,255,.15);";
+  });
+  filterWrap.append(genderSelect, leagueSelect);
+  searchButton.parentNode?.insertBefore(filterWrap, searchButton);
+
+  let availableLeagues = [];
+  let lastGames = [];
+
+  function leagueKey(game) {
+    const league = game?.league || {};
+    return `${String(league.id ?? "")}::${String(league.name ?? "")}`;
+  }
+
+  function renderLeagueOptions(games) {
+    const byKey = new Map();
+    games.forEach(game => {
+      const league = game?.league;
+      if (!league?.name) return;
+      const key = leagueKey(game);
+      if (!byKey.has(key)) byKey.set(key, league);
+    });
+
+    const current = leagueSelect.value;
+    leagueSelect.innerHTML = `<option value="all">Todas as ligas úteis</option>`;
+    Array.from(byKey.values())
+      .sort((a, b) => String(a.name).localeCompare(String(b.name), "pt-BR"))
+      .forEach(league => {
+        const option = document.createElement("option");
+        option.value = `${league.id ?? ""}::${league.name}`;
+        option.textContent = `${league.country ? `${league.country} · ` : ""}${league.name}`;
+        leagueSelect.appendChild(option);
+      });
+
+    if (Array.from(leagueSelect.options).some(option => option.value === current)) {
+      leagueSelect.value = current;
+    }
+  }
+
+  function getFilteredGames() {
+    const gender = genderSelect.value;
+    const league = leagueSelect.value;
+    return lastGames.filter(game => {
+      const gameGender = game?.league?.gender || null;
+      const genderOk = gender === "all" || gameGender === gender;
+      const leagueOk = league === "all" || leagueKey(game) === league;
+      return genderOk && leagueOk;
+    });
+  }
+
+  function renderGames(games) {
+    clearGames();
+    if (!games.length) {
+      setStatus("Nenhum jogo corresponde aos filtros selecionados.");
+      return;
+    }
+
+    setStatus(`${games.length} jogo(s) encontrado(s) nas ligas úteis.`);
+    games.forEach(function (game) {
+      const item = document.createElement("div");
+      item.className = "game-search-item";
+
+      const fixtureId =
+        game.fixture_id ?? game.fixtureId ?? game.fixture?.id ?? game.id ?? null;
+      const provider = String(game.provider || "sportmonks").toLowerCase();
+
+      const homeName =
+        game.home_team?.name ?? game.homeTeam?.name ?? game.home?.name ??
+        game.home_name ?? game.participants?.[0]?.name ?? "Mandante";
+      const awayName =
+        game.away_team?.name ?? game.awayTeam?.name ?? game.away?.name ??
+        game.away_name ?? game.participants?.[1]?.name ?? "Visitante";
+
+      const leagueName = game.league?.name || "Liga não informada";
+      const providerLabel = provider === "api-football" ? "API-Football" : "SportMonks";
+      const genderLabel = game.league?.gender === "female" ? "Feminino" : game.league?.gender === "male" ? "Masculino" : "Internacional";
+      item.textContent = `${homeName} × ${awayName} · ${leagueName} · ${genderLabel} · ${providerLabel}`;
+
+      if (fixtureId) {
+        item.dataset.fixtureId = String(fixtureId);
+        item.dataset.provider = provider;
+        item.addEventListener("click", function () {
+          document.dispatchEvent(new CustomEvent("greenEngineFixtureSelected", {
+            detail: {
+              id: fixtureId,
+              provider,
+              league: game.league || null,
+              source: game
+            }
+          }));
+        });
+      }
+
+      gamesList.appendChild(item);
+    });
+  }
+
+  genderSelect.addEventListener("change", () => renderGames(getFilteredGames()));
+  leagueSelect.addEventListener("change", () => renderGames(getFilteredGames()));
+
+  async function loadLeagueCatalog() {
+    try {
+      const response = await fetch("/api/leagues", { method: "GET", headers: { "Accept": "application/json" } });
+      if (!response.ok) return;
+      const data = await response.json();
+      availableLeagues = Array.isArray(data?.data) ? data.data : [];
+      window.greenEngineLeagueCatalog = availableLeagues;
+    } catch (error) {
+      console.warn("[Green Engine] Catálogo de ligas indisponível:", error);
+    }
+  }
+
   async function loadGamesByDate() {
     const selectedDate = dateInput.value;
     if (!selectedDate) {
@@ -57,7 +187,7 @@
       return;
     }
 
-    setStatus("Pesquisando jogos...");
+    setStatus("Pesquisando jogos nas ligas úteis...");
     clearGames();
 
     try {
@@ -77,49 +207,9 @@
       else if (Array.isArray(data.fixtures)) games = data.fixtures;
       else if (Array.isArray(data.results)) games = data.results;
 
-      if (!games.length) {
-        setStatus("Nenhum jogo encontrado para esta data.");
-        return;
-      }
-
-      setStatus(`${games.length} jogo(s) encontrado(s).`);
-
-      games.forEach(function (game) {
-        const item = document.createElement("div");
-        item.className = "game-search-item";
-
-        const fixtureId =
-          game.fixture_id ?? game.fixtureId ?? game.fixture?.id ?? game.id ?? null;
-        const provider = String(game.provider || "sportmonks").toLowerCase();
-
-        const homeName =
-          game.home_team?.name ?? game.homeTeam?.name ?? game.home?.name ??
-          game.home_name ?? game.participants?.[0]?.name ?? "Mandante";
-        const awayName =
-          game.away_team?.name ?? game.awayTeam?.name ?? game.away?.name ??
-          game.away_name ?? game.participants?.[1]?.name ?? "Visitante";
-
-        const leagueName = game.league?.name || "Liga não informada";
-        const providerLabel = provider === "api-football" ? "API-Football" : "SportMonks";
-        item.textContent = `${homeName} × ${awayName} · ${leagueName} · ${providerLabel}`;
-
-        if (fixtureId) {
-          item.dataset.fixtureId = String(fixtureId);
-          item.dataset.provider = provider;
-          item.addEventListener("click", function () {
-            document.dispatchEvent(new CustomEvent("greenEngineFixtureSelected", {
-              detail: {
-                id: fixtureId,
-                provider,
-                league: game.league || null,
-                source: game
-              }
-            }));
-          });
-        }
-
-        gamesList.appendChild(item);
-      });
+      lastGames = games.filter(game => game?.league?.enabled !== false);
+      renderLeagueOptions(lastGames);
+      renderGames(getFilteredGames());
     } catch (error) {
       console.error("[Green Engine] Erro na pesquisa:", error);
       setStatus("Não foi possível carregar os jogos.");
@@ -130,6 +220,7 @@
   dateInput.value = getTodayLocal();
   searchButton.addEventListener("click", loadGamesByDate);
   window.greenEngineSearchGames = loadGamesByDate;
+  loadLeagueCatalog();
 })();
 
 (function installDashboardMarketPolish() {
@@ -142,6 +233,7 @@
     .markets-table td.market-name { color:#ffffff !important; font-weight:800 !important; text-shadow:none !important; }
     .markets-table td.muted { color:#dbe4ee !important; opacity:1 !important; text-shadow:none !important; }
     .markets-table .badge-pill { font-weight:800 !important; letter-spacing:.02em; text-shadow:none !important; }
+    .green-engine-league-filters select { color-scheme:dark; }
   `;
   document.head.appendChild(style);
 
