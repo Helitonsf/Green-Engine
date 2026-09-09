@@ -1,5 +1,6 @@
 name: J.2.10 Validation
 
+# Triggered once to validate the committed engine and mock integration.
 on:
   push:
     paths:
