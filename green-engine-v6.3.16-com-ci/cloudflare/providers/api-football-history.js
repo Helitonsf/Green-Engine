@@ -32,18 +32,8 @@ function toNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function statValue(statistics, name) {
-  const entry = (statistics || []).find(item =>
-    String(item?.type || "").toLowerCase() === String(name).toLowerCase()
-  );
-  return toNumber(entry?.value);
-}
-
-function classifyStatistics(statistics, teamId) {
+function classifyStatistics(statistics) {
   const rows = Array.isArray(statistics) ? statistics : [];
-  const own = rows.find(row => Number(row?.team?.id) === Number(teamId));
-  const stats = Array.isArray(own?.statistics) ? own.statistics : [];
-
   const map = {
     "corner kicks": "corners",
     "ball possession": "possession",
@@ -57,13 +47,18 @@ function classifyStatistics(statistics, teamId) {
     "offsides": "offsides"
   };
 
-  return stats.map(stat => ({
-    typeId: null,
-    category: map[String(stat?.type || "").toLowerCase()] || "unclassified",
-    participantId: Number(teamId),
-    location: null,
-    value: toNumber(stat?.value)
-  })).filter(stat => stat.value != null);
+  return rows.flatMap(row => {
+    const teamId = Number(row?.team?.id);
+    const stats = Array.isArray(row?.statistics) ? row.statistics : [];
+    if (!teamId) return [];
+    return stats.map(stat => ({
+      typeId: null,
+      category: map[String(stat?.type || "").toLowerCase()] || "unclassified",
+      participantId: teamId,
+      location: null,
+      value: toNumber(stat?.value)
+    })).filter(stat => stat.value != null);
+  });
 }
 
 function normalizeFixture(fixture, teamId) {
@@ -91,7 +86,7 @@ function normalizeFixture(fixture, teamId) {
     goalsAgainst: scoreAvailable ? (isHome ? awayGoals : homeGoals) : null,
     score: { home: homeGoals, away: awayGoals },
     statistics: Array.isArray(fixture?.statistics) ? fixture.statistics : [],
-    statisticsNormalized: classifyStatistics(fixture?.statistics, teamId),
+    statisticsNormalized: classifyStatistics(fixture?.statistics),
     scoreSource: "goals.home-away",
     scoreAvailable
   };
