@@ -1,0 +1,59 @@
+name: J.2.10 Mercados Sync
+
+# One-time synchronization of the already validated local J.2.10 market change.
+on:
+  push:
+    paths:
+      - '.github/workflows/j210-mercados-sync.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Backup, patch and validate
+        shell: bash
+        run: |
+          set -euo pipefail
+          FILE="green-engine-v6.3.16-com-ci/cloudflare/history-core.js"
+          test -f "$FILE"
+          if grep -q 'J.2.10-MERCADOS-03' "$FILE"; then
+            echo 'J.2.10 already present; no patch required.'
+            exit 0
+          fi
+          BACKUP_BRANCH="backup/j2.10-mercados-pre-${GITHUB_SHA:0:12}"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git branch "$BACKUP_BRANCH" "$GITHUB_SHA"
+          git push origin "$BACKUP_BRANCH"
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('green-engine-v6.3.16-com-ci/cloudflare/history-core.js')
+          s=p.read_text(encoding='utf-8')
+          marker='function calculateGreenScore(home, away, homeVenueMatches = [], awayVenueMatches = []) {'
+          conn='  const markets = marketInputs.map(([name, modelProbability, empiricalProbability, observations]) =>'
+          helper='''/*\n * J.2.10-MERCADOS-03\n * Mercados estatísticos adicionais: escanteios + cartões amarelos.\n */\nfunction collectStatTotals(history, category) {\n  const matches = Array.isArray(history?.matches) ? history.matches : [];\n  const values = [];\n  for (const match of matches) {\n    const stats = Array.isArray(match?.statisticsNormalized) ? match.statisticsNormalized : [];\n    const categoryStats = stats.filter(s => s?.category === category).map(s => Number(s?.value)).filter(Number.isFinite);\n    if (!categoryStats.length) continue;\n    const total = categoryStats.reduce((sum, value) => sum + value, 0);\n    if (Number.isFinite(total)) values.push(total);\n  }\n  return values;\n}\nfunction poissonProbabilityAtLeast(lambda, minimum) {\n  if (!Number.isFinite(lambda) || lambda <= 0) return null;\n  const min = Math.max(0, Math.floor(minimum));\n  let cumulative = 0;\n  let term = Math.exp(-lambda);\n  for (let k = 0; k < min; k++) { cumulative += term; term *= lambda / (k + 1); }\n  return clamp(1 - cumulative, 0, 1);\n}\nfunction poissonProbabilityAtMost(lambda, maximum) {\n  if (!Number.isFinite(lambda) || lambda <= 0) return null;\n  const max = Math.max(0, Math.floor(maximum));\n  let cumulative = Math.exp(-lambda);\n  let term = cumulative;\n  for (let k = 1; k <= max; k++) { term *= lambda / k; cumulative += term; }\n  return clamp(cumulative, 0, 1);\n}\nfunction buildStatisticalMarketInputs(home, away, required) {\n  const definitions = [\n    { category: 'corners', markets: [['Escanteios Over 8.5','over',8],['Escanteios Over 10.5','over',10],['Escanteios Under 12.5','under',12]] },\n    { category: 'yellowCards', markets: [['Cartões amarelos Over 3.5','over',3],['Cartões amarelos Over 4.5','over',4],['Cartões amarelos Under 6.5','under',6]] }\n  ];\n  const output=[];\n  for (const definition of definitions) {\n    const observations=[...collectStatTotals(home,definition.category),...collectStatTotals(away,definition.category)];\n    if (observations.length < required) continue;\n    const lambda=observations.reduce((sum,value)=>sum+value,0)/observations.length;\n    if (!Number.isFinite(lambda) || lambda <= 0) continue;\n    for (const [name,direction,line] of definition.markets) {\n      const modelProbability=direction==='over' ? poissonProbabilityAtLeast(lambda,line+1) : poissonProbabilityAtMost(lambda,line);\n      const empiricalProbability=observations.filter(value=>direction==='over' ? value>line : value<=line).length/observations.length;\n      if (!Number.isFinite(modelProbability) || !Number.isFinite(empiricalProbability)) continue;\n      const marketObservations=observations.map(value=>direction==='over' ? (value>line?1:0) : (value<=line?1:0));\n      output.push([name,modelProbability,empiricalProbability,marketObservations]);\n    }\n  }\n  return output;\n}\n'''
+          if marker not in s: raise SystemExit('calculateGreenScore marker not found')
+          if conn not in s: raise SystemExit('market connection marker not found')
+          s=s.replace(marker,helper+'\n'+marker,1)
+          connection='''  /* J.2.10-MERCADOS-03 */\n  const statisticalMarketInputs = buildStatisticalMarketInputs(home, away, required);\n  marketInputs.push(...statisticalMarketInputs);\n\n'''
+          s=s.replace(conn,connection+conn,1)
+          p.write_text(s,encoding='utf-8',newline='\n')
+          PY
+          for x in 'function collectStatTotals' 'function poissonProbabilityAtLeast' 'function poissonProbabilityAtMost' 'function buildStatisticalMarketInputs' 'Escanteios Over 8.5' 'Escanteios Over 10.5' 'Escanteios Under 12.5' 'Cartões amarelos Over 3.5' 'Cartões amarelos Over 4.5' 'Cartões amarelos Under 6.5' 'marketInputs.push'; do grep -q "$x" "$FILE"; done
+          node --check "$FILE"
+          git diff --check
+          git diff -- "$FILE"
+          git add "$FILE"
+          git commit -m 'feat: add corners and yellow cards markets'
+          git push origin HEAD:main
+          git rm .github/workflows/j210-mercados-sync.yml
+          git commit -m 'chore: remove one-time J.2.10 sync workflow'
+          git push origin HEAD:main
