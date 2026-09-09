@@ -735,6 +735,171 @@ function normalizeGreenScoreOutput(score) {
   };
 }
 
+/*
+ * J.2.10-MERCADOS-03
+ *
+ * Mercados estatísticos adicionais:
+ * escanteios + cartões amarelos.
+ */
+
+function collectStatTotals(history, category) {
+  const matches = Array.isArray(history?.matches)
+    ? history.matches
+    : [];
+
+  const values = [];
+
+  for (const match of matches) {
+    const stats = Array.isArray(match?.statisticsNormalized)
+      ? match.statisticsNormalized
+      : [];
+
+    const categoryStats = stats
+      .filter(s => s?.category === category)
+      .map(s => Number(s?.value))
+      .filter(Number.isFinite);
+
+    if (!categoryStats.length) continue;
+
+    const total = categoryStats.reduce(
+      (sum, value) => sum + value,
+      0
+    );
+
+    if (Number.isFinite(total)) {
+      values.push(total);
+    }
+  }
+
+  return values;
+}
+
+function poissonProbabilityAtLeast(lambda, minimum) {
+  if (!Number.isFinite(lambda) || lambda <= 0) return null;
+
+  const min = Math.max(0, Math.floor(minimum));
+
+  let cumulative = 0;
+  let term = Math.exp(-lambda);
+
+  for (let k = 0; k < min; k++) {
+    cumulative += term;
+    term *= lambda / (k + 1);
+  }
+
+  return clamp(1 - cumulative, 0, 1);
+}
+
+function poissonProbabilityAtMost(lambda, maximum) {
+  if (!Number.isFinite(lambda) || lambda <= 0) return null;
+
+  const max = Math.max(0, Math.floor(maximum));
+
+  let cumulative = Math.exp(-lambda);
+  let term = cumulative;
+
+  for (let k = 1; k <= max; k++) {
+    term *= lambda / k;
+    cumulative += term;
+  }
+
+  return clamp(cumulative, 0, 1);
+}
+
+function buildStatisticalMarketInputs(home, away, required) {
+  const definitions = [
+    {
+      category: "corners",
+      markets: [
+        ["Escanteios Over 8.5", "over", 8],
+        ["Escanteios Over 10.5", "over", 10],
+        ["Escanteios Under 12.5", "under", 12]
+      ]
+    },
+    {
+      category: "yellowCards",
+      markets: [
+        ["Cartões amarelos Over 3.5", "over", 3],
+        ["Cartões amarelos Over 4.5", "over", 4],
+        ["Cartões amarelos Under 6.5", "under", 6]
+      ]
+    }
+  ];
+
+  const output = [];
+
+  for (const definition of definitions) {
+    const homeValues = collectStatTotals(
+      home,
+      definition.category
+    );
+
+    const awayValues = collectStatTotals(
+      away,
+      definition.category
+    );
+
+    const observations = [
+      ...homeValues,
+      ...awayValues
+    ];
+
+    if (observations.length < required) {
+      continue;
+    }
+
+    const lambda =
+      observations.reduce(
+        (sum, value) => sum + value,
+        0
+      ) / observations.length;
+
+    if (!Number.isFinite(lambda) || lambda <= 0) {
+      continue;
+    }
+
+    for (const [
+      name,
+      direction,
+      line
+    ] of definition.markets) {
+      const modelProbability =
+        direction === "over"
+? poissonProbabilityAtLeast(lambda, line + 1)
+: poissonProbabilityAtMost(lambda, line);
+
+      const empiricalProbability =
+        observations.filter(value =>
+direction === "over"
+  ? value > line
+  : value <= line
+        ).length / observations.length;
+
+      if (
+        !Number.isFinite(modelProbability) ||
+        !Number.isFinite(empiricalProbability)
+      ) {
+        continue;
+      }
+
+      const marketObservations = observations.map(value =>
+        direction === "over"
+? (value > line ? 1 : 0)
+: (value <= line ? 1 : 0)
+      );
+
+      output.push([
+        name,
+        modelProbability,
+        empiricalProbability,
+        marketObservations
+      ]);
+    }
+  }
+
+  return output;
+}
+
 function calculateGreenScore(home, away, homeVenueMatches = [], awayVenueMatches = []) {
   const required = Math.min(home.sampleSize || 0, away.sampleSize || 0);
 
@@ -801,6 +966,21 @@ function calculateGreenScore(home, away, homeVenueMatches = [], awayVenueMatches
       awayVenueMatches.map(m => m.result === "W" || m.result === "D" ? 1 : 0)
     ]
   ];
+
+  /*
+ * J.2.10-MERCADOS-03
+ * Conexão dos mercados estatísticos adicionais.
+ */
+const statisticalMarketInputs =
+  buildStatisticalMarketInputs(
+    home,
+    away,
+    required
+  );
+
+marketInputs.push(
+  ...statisticalMarketInputs
+);
 
   const markets = marketInputs.map(([name, modelProbability, empiricalProbability, observations]) =>
     confidenceMarket(name, modelProbability, empiricalProbability, observations, required)
