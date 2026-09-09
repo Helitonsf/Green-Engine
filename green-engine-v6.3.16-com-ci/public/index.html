@@ -1381,8 +1381,8 @@ function renderValidation(data){
     : "Sem mercados suficientes para calcular o Confidence Score.";
 }
 
-async function loadFixture(id){
-  const response = await fetch("/api/fixture?id=" + encodeURIComponent(id));
+async function loadFixture(id, provider = "sportmonks"){
+  const response = await fetch("/api/fixture?id=" + encodeURIComponent(id) + "&provider=" + encodeURIComponent(provider));
   const data = await response.json();
 
   if(!response.ok){
@@ -1426,8 +1426,8 @@ async function loadFixture(id){
   return fixture;
 }
 
-async function loadHistory(id){
-  const response = await fetch("/api/history?fixture=" + encodeURIComponent(id));
+async function loadHistory(id, provider = "sportmonks"){
+  const response = await fetch("/api/history?fixture=" + encodeURIComponent(id) + "&provider=" + encodeURIComponent(provider));
   const data = await response.json();
 
   if(!response.ok || data.error){
@@ -1466,6 +1466,7 @@ async function loadHistory(id){
 
 document.addEventListener("greenEngineFixtureSelected", async event => {
   const id = event.detail?.id;
+  const provider = String(event.detail?.provider || "sportmonks").toLowerCase();
 
   if(!id){
     console.warn("[Green Engine] Fixture selecionado sem ID.");
@@ -1481,8 +1482,8 @@ document.addEventListener("greenEngineFixtureSelected", async event => {
     showError(null);
     showLoadingSkeletons();
 
-    await loadFixture(String(id));
-    await loadHistory(String(id));
+    await loadFixture(String(id), provider);
+    await loadHistory(String(id), provider);
 
     const elapsedSeconds = ((performance.now() - startedAt) / 1000).toFixed(2);
     $("summaryElapsed").textContent = elapsedSeconds + "s";
