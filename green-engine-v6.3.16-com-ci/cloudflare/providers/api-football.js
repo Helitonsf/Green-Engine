@@ -1,9 +1,16 @@
+import { enrichLeague, isAllowedLeague } from "./league-catalog.js";
+
 const API_FOOTBALL_BASE = "https://v3.football.api-sports.io";
 const FETCH_TIMEOUT_MS = 10000;
 
 function normalizeFixture(fixture) {
   const teams = fixture?.teams || {};
   const league = fixture?.league || {};
+  const leagueMeta = enrichLeague({
+    id: league.id,
+    name: league.name,
+    country: league.country
+  });
   return {
     provider: "api-football",
     id: fixture?.fixture?.id ?? null,
@@ -26,7 +33,10 @@ function normalizeFixture(fixture) {
       name: league.name,
       country: league.country || null,
       season: league.season ?? null,
-      round: league.round || null
+      round: league.round || null,
+      gender: leagueMeta.gender,
+      priority: leagueMeta.priority,
+      enabled: leagueMeta.enabled
     } : null,
     source: fixture
   };
@@ -87,7 +97,8 @@ export async function apiFootballLeagues(env) {
         countryName: item?.country?.name ?? null,
         currentSeasonId: item?.seasons?.find(season => season?.current)?.year ?? null,
         coverage: item?.seasons?.find(season => season?.current)?.coverage ?? null
-      })).filter(item => item.id != null)
+      })).filter(item => isAllowedLeague(item))
+        .map(enrichLeague)
     : [];
   data.diagnostic = providerDiagnostic(result);
   return data;
@@ -101,12 +112,13 @@ export async function apiFootballSports(date, env) {
     `/fixtures?date=${encodeURIComponent(date)}&timezone=America/Sao_Paulo`,
     env.API_FOOTBALL_KEY
   );
+  const data = result.ok && Array.isArray(result.data?.response)
+    ? result.data.response.map(normalizeFixture).filter(fixture => fixture.league?.enabled)
+    : [];
   return {
     provider: "api-football",
-    results: Number(result.data?.results || 0),
-    data: result.ok && Array.isArray(result.data?.response)
-      ? result.data.response.map(normalizeFixture)
-      : [],
+    results: data.length,
+    data,
     diagnostic: providerDiagnostic(result)
   };
 }
@@ -120,5 +132,6 @@ export async function apiFootballFixture(id, env) {
   if (!result.ok || !Array.isArray(result.data?.response) || !result.data.response[0]) {
     return null;
   }
-  return normalizeFixture(result.data.response[0]);
+  const fixture = normalizeFixture(result.data.response[0]);
+  return fixture.league?.enabled ? fixture : null;
 }
