@@ -9,9 +9,12 @@ function normalizeFixture(fixture) {
     id: fixture?.fixture?.id ?? null,
     fixture_id: fixture?.fixture?.id ?? null,
     date: fixture?.fixture?.date ?? null,
+    starting_at: fixture?.fixture?.date ?? null,
     timestamp: fixture?.fixture?.timestamp ?? null,
     timezone: fixture?.fixture?.timezone ?? null,
     status: fixture?.fixture?.status ?? null,
+    state: fixture?.fixture?.status?.long ?? null,
+    name: teams.home?.name && teams.away?.name ? `${teams.home.name} vs ${teams.away.name}` : null,
     home: teams.home ? { id: teams.home.id, name: teams.home.name } : null,
     away: teams.away ? { id: teams.away.id, name: teams.away.name } : null,
     participants: [
@@ -103,5 +106,5 @@ export async function apiFootballFixture(id, env) {
   if (!result.ok || !Array.isArray(result.data?.response) || !result.data.response[0]) {
     return null;
   }
-  return result.data.response[0];
+  return normalizeFixture(result.data.response[0]);
 }
