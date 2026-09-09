@@ -187,3 +187,97 @@
 
   window.greenEngineSearchGames = loadGamesByDate;
 })();
+
+/*
+ * J.2.10-UI: acabamento visual e proteção da decisão operacional.
+ * A seleção do melhor mercado continua sendo feita pelo motor; esta camada
+ * apenas melhora a leitura e impede que "APOSTAR" apareça sem odd real.
+ */
+(function installDashboardMarketPolish() {
+  const style = document.createElement("style");
+  style.textContent = `
+    .markets-table th {
+      color: #f8fafc !important;
+      font-weight: 800 !important;
+      text-shadow: 0 1px 1px rgba(0,0,0,.35);
+    }
+    .markets-table tbody td {
+      color: #eef2f7 !important;
+      font-weight: 600;
+    }
+    .markets-table tbody tr:nth-child(even) td {
+      background: rgba(255,255,255,.025);
+    }
+    .markets-table tbody tr:hover td {
+      background: rgba(255,255,255,.055);
+    }
+    .markets-table td.market-name {
+      color: #ffffff !important;
+      font-weight: 750 !important;
+    }
+    .markets-table td.muted {
+      color: #cbd5e1 !important;
+      opacity: 1 !important;
+    }
+    .markets-table .badge-pill {
+      font-weight: 800 !important;
+      letter-spacing: .02em;
+    }
+  `;
+  document.head.appendChild(style);
+
+  const originalRenderMarketsTable = window.renderMarketsTable;
+
+  if (typeof originalRenderMarketsTable === "function") {
+    window.renderMarketsTable = function (greenScore) {
+      originalRenderMarketsTable(greenScore);
+
+      const markets = Array.isArray(greenScore?.markets)
+        ? greenScore.markets
+        : [];
+
+      const summary = document.getElementById("summaryMarketsCount");
+      if (summary) {
+        summary.textContent = markets.length ? String(markets.length) : "—";
+      }
+
+      const recommended = greenScore?.recommendedMarket;
+      if (!recommended) return;
+
+      const market = markets.find(function (entry) {
+        return entry?.market === recommended;
+      });
+
+      const row = Array.from(
+        document.querySelectorAll("#marketsTableBody tr")
+      ).find(function (tr) {
+        return tr.querySelector(".market-name")?.textContent?.trim() === recommended;
+      });
+
+      if (!row || !market) return;
+
+      const currentOdd = Number(
+        market.currentOdd ??
+        market.odd ??
+        market.odds?.current
+      );
+
+      const badgeCell = row.lastElementChild;
+      if (!badgeCell) return;
+
+      let label = "SEM ODDS";
+      let cls = "badge-neutro";
+
+      if (Number.isFinite(currentOdd)) {
+        if (currentOdd >= 1.40 && currentOdd <= 1.60) {
+          label = "APOSTAR";
+          cls = "badge-apostar";
+        } else {
+          label = "FORA DA FAIXA";
+        }
+      }
+
+      badgeCell.innerHTML = `<span class="badge-pill ${cls}">${label}</span>`;
+    };
+  }
+})();
