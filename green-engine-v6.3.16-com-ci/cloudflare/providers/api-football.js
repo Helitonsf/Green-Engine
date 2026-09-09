@@ -68,30 +68,35 @@ export function apiFootballConfigured(env) {
 }
 
 export async function apiFootballLeagues(env) {
-  if (!env.API_FOOTBALL_KEY) return { data: [], diagnostic: { status: null, errors: { configuration: "API_FOOTBALL_KEY ausente" } } };
+  if (!env.API_FOOTBALL_KEY) {
+    const data = [];
+    data.diagnostic = { status: null, errors: { configuration: "API_FOOTBALL_KEY ausente" } };
+    return data;
+  }
   const result = await apiFetch("/leagues?current=true", env.API_FOOTBALL_KEY);
-  return {
-    data: result.ok && Array.isArray(result.data?.response)
-      ? result.data.response.map(item => ({
-          provider: "api-football",
-          id: item?.league?.id ?? null,
-          name: item?.league?.name ?? "Liga sem nome",
-          shortCode: item?.league?.code ?? null,
-          active: true,
-          type: item?.league?.type ?? null,
-          subType: null,
-          countryId: item?.country?.code ?? item?.country?.name ?? null,
-          countryName: item?.country?.name ?? null,
-          currentSeasonId: item?.seasons?.find(season => season?.current)?.year ?? null,
-          coverage: item?.seasons?.find(season => season?.current)?.coverage ?? null
-        })).filter(item => item.id != null)
-      : [],
-    diagnostic: providerDiagnostic(result)
-  };
+  const data = result.ok && Array.isArray(result.data?.response)
+    ? result.data.response.map(item => ({
+        provider: "api-football",
+        id: item?.league?.id ?? null,
+        name: item?.league?.name ?? "Liga sem nome",
+        shortCode: item?.league?.code ?? null,
+        active: true,
+        type: item?.league?.type ?? null,
+        subType: null,
+        countryId: item?.country?.code ?? item?.country?.name ?? null,
+        countryName: item?.country?.name ?? null,
+        currentSeasonId: item?.seasons?.find(season => season?.current)?.year ?? null,
+        coverage: item?.seasons?.find(season => season?.current)?.coverage ?? null
+      })).filter(item => item.id != null)
+    : [];
+  data.diagnostic = providerDiagnostic(result);
+  return data;
 }
 
 export async function apiFootballSports(date, env) {
-  if (!env.API_FOOTBALL_KEY) return { provider: "api-football", results: 0, data: [], diagnostic: { status: null, errors: { configuration: "API_FOOTBALL_KEY ausente" } } };
+  if (!env.API_FOOTBALL_KEY) {
+    return { provider: "api-football", results: 0, data: [], diagnostic: { status: null, errors: { configuration: "API_FOOTBALL_KEY ausente" } } };
+  }
   const result = await apiFetch(
     `/fixtures?date=${encodeURIComponent(date)}&timezone=America/Sao_Paulo`,
     env.API_FOOTBALL_KEY
