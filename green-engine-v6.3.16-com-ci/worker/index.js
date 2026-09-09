@@ -9,6 +9,7 @@ const FETCH_TIMEOUT_MS = 10000;
 // TTL de cache por endpoint (segundos). Ajustável sem mexer na lógica.
 const CACHE_TTL = {
   sports: 120,   // lista de jogos do dia
+  leagues: 3600, // catálogo de ligas disponível no token
   fixture: 60,   // dados de um fixture (placar/estado podem mudar perto do jogo)
   history: 300   // histórico das últimas 5 partidas válidas por equipe
 };
@@ -214,6 +215,50 @@ async function sports(url, env) {
   }, 200);
 }
 
+async function leagues(env) {
+  if (!env.SPORTMONKS_API_TOKEN) {
+    return json({
+      error: "SPORTMONKS_API_TOKEN nao esta configurado no Cloudflare."
+    }, 500);
+  }
+
+  const endpoint =
+    "https://api.sportmonks.com/v3/football/leagues" +
+    `?api_token=${encodeURIComponent(env.SPORTMONKS_API_TOKEN)}` +
+    "&include=currentSeason";
+
+  const result = await fetchSportMonksJson(endpoint);
+
+  if (!result.ok) {
+    return json({
+      error: result.status === 504
+        ? result.data.error
+        : "SportMonks retornou um erro ao buscar as ligas disponíveis.",
+      details: result.data
+    }, result.status);
+  }
+
+  const data = result.data || {};
+  const availableLeagues = Array.isArray(data.data)
+    ? data.data.map(league => ({
+        id: league.id,
+        name: league.name,
+        shortCode: league.short_code || null,
+        active: league.active !== false,
+        type: league.type || null,
+        subType: league.sub_type || null,
+        countryId: league.country_id ?? null,
+        currentSeasonId: league.currentseason?.id ?? league.currentSeason?.id ?? null
+      }))
+    : [];
+
+  return json({
+    ...data,
+    data: availableLeagues,
+    availableLeagueCount: availableLeagues.length
+  }, 200);
+}
+
 async function fixture(url, env) {
   const id = url.searchParams.get("id");
 
@@ -327,6 +372,11 @@ export default {
 
       if (url.pathname === "/api/sports") {
         const response = await withCache(request, ctx, CACHE_TTL.sports, () => sports(url, env));
+        return cors(request, response, env);
+      }
+
+      if (url.pathname === "/api/leagues") {
+        const response = await withCache(request, ctx, CACHE_TTL.leagues, () => leagues(env));
         return cors(request, response, env);
       }
 
