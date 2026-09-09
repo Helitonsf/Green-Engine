@@ -1,0 +1,42 @@
+name: Deploy Green Engine Worker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'green-engine-v6.3.16-com-ci/cloudflare/**'
+      - 'green-engine-v6.3.16-com-ci/wrangler.toml'
+      - '.github/workflows/cloudflare-worker.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cloudflare-worker
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: green-engine-v6.3.16-com-ci
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Validate Worker syntax
+        run: node --check cloudflare/history-core.js && node --check cloudflare/worker/index.js
+
+      - name: Deploy Worker to Cloudflare
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: green-engine-v6.3.16-com-ci
