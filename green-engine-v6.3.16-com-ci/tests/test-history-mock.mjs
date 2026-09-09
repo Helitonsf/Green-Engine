@@ -43,6 +43,32 @@ function historyFixture(id, home, away, date, hg, ag) {
         }
       }
     ],
+    statistics: [
+      {
+        type_id: 34,
+        participant_id: home,
+        location: "home",
+        data: { value: 4 }
+      },
+      {
+        type_id: 34,
+        participant_id: away,
+        location: "away",
+        data: { value: 6 }
+      },
+      {
+        type_id: 84,
+        participant_id: home,
+        location: "home",
+        data: { value: 2 }
+      },
+      {
+        type_id: 84,
+        participant_id: away,
+        location: "away",
+        data: { value: 3 }
+      }
+    ],
     state: {
       name: "Full Time"
     }
@@ -208,7 +234,29 @@ try {
     "greenScore.markets deveria ser um array não vazio"
   );
 
-  console.log("\n✅ test-history-mock: todos os asserts passaram.");
+  const marketNames = result.body.greenScore.markets.map(m => m.market);
+
+  for (const market of [
+    "Escanteios Over 8.5",
+    "Escanteios Over 10.5",
+    "Escanteios Under 12.5",
+    "Cartões amarelos Over 3.5",
+    "Cartões amarelos Over 4.5",
+    "Cartões amarelos Under 6.5"
+  ]) {
+    assert.ok(
+      marketNames.includes(market),
+      `mercado adicional ausente: ${market}`
+    );
+  }
+
+  assert.equal(
+    result.body.greenScore.markets.length,
+    14,
+    "o Green Score deveria conter 8 mercados existentes + 6 novos mercados estatísticos"
+  );
+
+  console.log("\n✅ test-history-mock: mercados existentes + escanteios + cartões amarelos validados.");
 } catch (error) {
   console.error("");
   console.error("=== ERRO ===");
