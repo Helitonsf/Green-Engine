@@ -148,7 +148,7 @@ async function sports(url, env) {
       error: "Nenhum jogo encontrado para esta data nos provedores configurados.",
       sources: {
         sportmonks: { configured: Boolean(env.SPORTMONKS_API_TOKEN), count: 0, error: sportmonksError },
-        apiFootball: { configured: apiFootballConfigured(env), count: apiFootballFixtures.length }
+        apiFootball: { configured: apiFootballConfigured(env), count: apiFootballFixtures.length, status: apiFootball?.diagnostic?.status ?? null, errors: apiFootball?.diagnostic?.errors ?? null }
       }
     }, 404);
   }
@@ -158,7 +158,7 @@ async function sports(url, env) {
     data: combined,
     sources: {
       sportmonks: { configured: Boolean(env.SPORTMONKS_API_TOKEN), count: normalizedSportMonks.length },
-      apiFootball: { configured: apiFootballConfigured(env), count: apiFootballFixtures.length }
+      apiFootball: { configured: apiFootballConfigured(env), count: apiFootballFixtures.length, status: apiFootball?.diagnostic?.status ?? null, errors: apiFootball?.diagnostic?.errors ?? null }
     },
     meta: {
       total: combined.length,
@@ -205,7 +205,7 @@ async function leagues(env) {
     providerMode: apiFootball.length ? "hybrid" : "sportmonks",
     sources: {
       sportmonks: { configured: Boolean(env.SPORTMONKS_API_TOKEN), count: sportmonksLeagues.length },
-      apiFootball: { configured: apiFootballConfigured(env), count: apiFootball.length }
+      apiFootball: { configured: apiFootballConfigured(env), count: apiFootball.length, status: apiFootball?.diagnostic?.status ?? null, errors: apiFootball?.diagnostic?.errors ?? null }
     },
     data: [...sportmonksLeagues, ...apiFootball],
     availableLeagueCount: sportmonksLeagues.length + apiFootball.length
