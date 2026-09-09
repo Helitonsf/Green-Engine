@@ -1,0 +1,45 @@
+name: Patch history-core exports
+
+on:
+  push:
+    paths:
+      - ".github/workflows/patch-history-core-exports.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Patch exports
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("green-engine-v6.3.16-com-ci/cloudflare/history-core.js")
+          text = path.read_text(encoding="utf-8")
+          original = text
+          text = text.replace("function normalizeGreenScoreOutput(score)", "export function normalizeGreenScoreOutput(score)", 1)
+          text = text.replace("function calculateGreenScore(home, away, homeVenueMatches = [], awayVenueMatches = [])", "export function calculateGreenScore(home, away, homeVenueMatches = [], awayVenueMatches = [])", 1)
+          if text == original:
+              raise SystemExit("Nenhuma exportacao foi aplicada; o arquivo ja pode estar corrigido.")
+          path.write_text(text, encoding="utf-8")
+          PY
+      - name: Validate
+        run: node --check green-engine-v6.3.16-com-ci/cloudflare/history-core.js && node --check green-engine-v6.3.16-com-ci/cloudflare/providers/api-football-history.js
+      - name: Commit exports
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add green-engine-v6.3.16-com-ci/cloudflare/history-core.js
+          git commit -m "refactor: export shared Green Engine market engine"
+          git push
+      - name: Remove temporary workflow
+        run: |
+          rm .github/workflows/patch-history-core-exports.yml
+          git add .github/workflows/patch-history-core-exports.yml
+          git commit -m "chore: remove temporary history-core patch workflow"
+          git push
