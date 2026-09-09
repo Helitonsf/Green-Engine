@@ -1,0 +1,49 @@
+name: Patch dashboard provider routing
+
+on:
+  push:
+    paths:
+      - ".github/workflows/patch-dashboard-provider.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Patch provider routing
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("green-engine-v6.3.16-com-ci/public/index.html")
+          text = path.read_text(encoding="utf-8")
+          original = text
+          text = text.replace('async function loadFixture(id){', 'async function loadFixture(id, provider = "sportmonks"){', 1)
+          text = text.replace('fetch("/api/fixture?id=" + encodeURIComponent(id))', 'fetch("/api/fixture?id=" + encodeURIComponent(id) + "&provider=" + encodeURIComponent(provider))', 1)
+          text = text.replace('async function loadHistory(id){', 'async function loadHistory(id, provider = "sportmonks"){', 1)
+          text = text.replace('fetch("/api/history?fixture=" + encodeURIComponent(id))', 'fetch("/api/history?fixture=" + encodeURIComponent(id) + "&provider=" + encodeURIComponent(provider))', 1)
+          text = text.replace('  const id = event.detail?.id;\n\n  if(!id){', '  const id = event.detail?.id;\n  const provider = String(event.detail?.provider || "sportmonks").toLowerCase();\n\n  if(!id){', 1)
+          text = text.replace('    await loadFixture(String(id));\n    await loadHistory(String(id));', '    await loadFixture(String(id), provider);\n    await loadHistory(String(id), provider);', 1)
+          if text == original:
+              raise SystemExit("Nenhuma alteracao aplicada.")
+          path.write_text(text, encoding="utf-8")
+          PY
+      - name: Validate
+        run: node --check green-engine-v6.3.16-com-ci/public/games-search-controller.js
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add green-engine-v6.3.16-com-ci/public/index.html
+          git commit -m "fix: route dashboard requests by fixture provider"
+          git push
+      - name: Remove temporary workflow
+        run: |
+          rm .github/workflows/patch-dashboard-provider.yml
+          git add .github/workflows/patch-dashboard-provider.yml
+          git commit -m "chore: remove temporary dashboard patch workflow"
+          git push
