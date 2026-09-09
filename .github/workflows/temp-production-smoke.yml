@@ -31,9 +31,9 @@ jobs:
           const leagues = await getJson(`${base}/api/leagues`);
           console.log('LEAGUE_SOURCES', JSON.stringify(leagues.sources));
           const rows = Array.isArray(sports.data) ? sports.data : [];
-          const af = rows.find(x => x.provider === 'api-football');
-          if (!af?.id) throw new Error(`No API-Football fixture found; sources=${JSON.stringify(sports.sources)} providers=${[...new Set(rows.map(x => x.provider))].join(',')}`);
-          console.log(`fixture=${af.id} ${af.name || ''}`);
+          const af = rows.find(x => x.provider === 'api-football' && /premiership/i.test(x.league?.name || '') && /scotland/i.test(x.league?.country || '')) || rows.find(x => x.provider === 'api-football' && /premiership/i.test(x.league?.name || ''));
+          if (!af?.id) throw new Error(`No suitable API-Football fixture found; sources=${JSON.stringify(sports.sources)} providers=${[...new Set(rows.map(x => x.provider))].join(',')}`);
+          console.log(`fixture=${af.id} ${af.name || ''} league=${af.league?.name || ''} country=${af.league?.country || ''}`);
           const fixture = await getJson(`${base}/api/fixture?id=${encodeURIComponent(af.id)}&provider=api-football`);
           if (fixture.provider !== 'api-football' || !fixture.data?.id) throw new Error('API-Football fixture normalization failed');
           const history = await getJson(`${base}/api/history?fixture=${encodeURIComponent(af.id)}&provider=api-football`);
