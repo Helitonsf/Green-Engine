@@ -1,5 +1,6 @@
 import { historyCore } from "../cloudflare/history-core.js";
 import { apiFootballConfigured, apiFootballLeagues, apiFootballSports, apiFootballFixture } from "../cloudflare/providers/api-football.js";
+import { apiFootballHistory } from "../cloudflare/providers/api-football-history.js";
 
 const JSON_HEADERS = {
   "Content-Type": "application/json; charset=utf-8"
@@ -249,13 +250,8 @@ async function history(url, env) {
   if (!/^\d+$/.test(id)) return json({ error: "Fixture ID invalido." }, 400);
 
   if (provider === "api-football") {
-    return json({
-      ok: false,
-      provider: "api-football",
-      version: "6.3.16",
-      error: "Historico API-Football sera ativado na proxima etapa de normalizacao do motor.",
-      diagnostic: { fixtureId: Number(id), provider, analysisAvailable: false }
-    }, 501);
+    const result = await apiFootballHistory(id, env);
+    return json(result.body, result.statusCode);
   }
 
   if (!env.SPORTMONKS_API_TOKEN) return json({ error: "SPORTMONKS_API_TOKEN nao esta configurado no Cloudflare." }, 500);
