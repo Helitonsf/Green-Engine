@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'green-engine-v6.3.16-com-ci/cloudflare/**'
+      - 'green-engine-v6.3.16-com-ci/worker/**'
       - 'green-engine-v6.3.16-com-ci/wrangler.toml'
       - '.github/workflows/cloudflare-worker.yml'
   workflow_dispatch:
@@ -32,7 +33,7 @@ jobs:
           node-version: 22
 
       - name: Validate Worker syntax
-        run: node --check cloudflare/history-core.js && node --check cloudflare/worker/index.js
+        run: node --check cloudflare/history-core.js && node --check worker/index.js
 
       - name: Deploy Worker to Cloudflare
         uses: cloudflare/wrangler-action@v3
