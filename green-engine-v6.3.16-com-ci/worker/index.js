@@ -1,5 +1,5 @@
 import { historyCore } from "../cloudflare/history-core.js";
-import { apiFootballConfigured, apiFootballLeagues } from "../cloudflare/providers/api-football.js";
+import { apiFootballConfigured, apiFootballLeagues, apiFootballSports, apiFootballFixture } from "../cloudflare/providers/api-football.js";
 
 const JSON_HEADERS = {
   "Content-Type": "application/json; charset=utf-8"
@@ -93,100 +93,112 @@ async function fetchSportMonksJson(endpoint) {
 async function sports(url, env) {
   const date = url.searchParams.get("date");
 
-  if (!env.SPORTMONKS_API_TOKEN) {
-    return json({ error: "SPORTMONKS_API_TOKEN nao esta configurado no Cloudflare." }, 500);
-  }
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return json({ error: "Data invalida. Use AAAA-MM-DD." }, 400);
   }
 
-  const baseEndpoint =
-    `https://api.sportmonks.com/v3/football/fixtures/date/${date}` +
-    `?api_token=${encodeURIComponent(env.SPORTMONKS_API_TOKEN)}` +
-    `&per_page=50&page=1&timezone=America/Sao_Paulo&include=participants`;
+  const sportmonksFixtures = [];
+  let sportmonksError = null;
 
-  const firstResult = await fetchSportMonksJson(baseEndpoint);
-  if (!firstResult.ok) {
-    return json({
-      error: firstResult.status === 504 ? firstResult.data.error : "SportMonks retornou um erro.",
-      details: firstResult.data
-    }, firstResult.status);
-  }
-
-  const firstData = firstResult.data || {};
-  const allFixtures = Array.isArray(firstData.data) ? [...firstData.data] : [];
-  const pagination = firstData.meta?.pagination || {};
-  const lastPage = Number(pagination.last_page || 1);
-
-  for (let page = 2; page <= lastPage && page <= 20; page += 1) {
-    const pageEndpoint =
+  if (env.SPORTMONKS_API_TOKEN) {
+    const baseEndpoint =
       `https://api.sportmonks.com/v3/football/fixtures/date/${date}` +
       `?api_token=${encodeURIComponent(env.SPORTMONKS_API_TOKEN)}` +
-      `&per_page=50&page=${page}&timezone=America/Sao_Paulo&include=participants`;
-    const pageResult = await fetchSportMonksJson(pageEndpoint);
-    if (!pageResult.ok) {
-      return json({
-        error: pageResult.status === 504 ? pageResult.data.error : "SportMonks retornou um erro ao paginar os jogos.",
-        details: pageResult.data
-      }, pageResult.status);
+      `&per_page=50&page=1&timezone=America/Sao_Paulo&include=participants`;
+
+    const firstResult = await fetchSportMonksJson(baseEndpoint);
+    if (firstResult.ok) {
+      const firstData = firstResult.data || {};
+      sportmonksFixtures.push(...(Array.isArray(firstData.data) ? firstData.data : []));
+      const pagination = firstData.meta?.pagination || {};
+      const lastPage = Number(pagination.last_page || 1);
+
+      for (let page = 2; page <= lastPage && page <= 20; page += 1) {
+        const pageEndpoint =
+          `https://api.sportmonks.com/v3/football/fixtures/date/${date}` +
+          `?api_token=${encodeURIComponent(env.SPORTMONKS_API_TOKEN)}` +
+          `&per_page=50&page=${page}&timezone=America/Sao_Paulo&include=participants`;
+        const pageResult = await fetchSportMonksJson(pageEndpoint);
+        if (!pageResult.ok) {
+          sportmonksError = pageResult.data;
+          break;
+        }
+        sportmonksFixtures.push(...(Array.isArray(pageResult.data?.data) ? pageResult.data.data : []));
+      }
+    } else {
+      sportmonksError = firstResult.data;
     }
-    const pageFixtures = Array.isArray(pageResult.data?.data) ? pageResult.data.data : [];
-    allFixtures.push(...pageFixtures);
+  }
+
+  const normalizedSportMonks = sportmonksFixtures.map(fixture => ({
+    ...fixture,
+    provider: "sportmonks"
+  }));
+
+  const apiFootball = apiFootballConfigured(env)
+    ? await apiFootballSports(date, env)
+    : null;
+
+  const apiFootballFixtures = apiFootball?.data || [];
+  const combined = [...normalizedSportMonks, ...apiFootballFixtures];
+
+  if (!combined.length) {
+    return json({
+      error: "Nenhum jogo encontrado para esta data nos provedores configurados.",
+      sources: {
+        sportmonks: { configured: Boolean(env.SPORTMONKS_API_TOKEN), count: 0, error: sportmonksError },
+        apiFootball: { configured: apiFootballConfigured(env), count: apiFootballFixtures.length }
+      }
+    }, 404);
   }
 
   return json({
-    ...firstData,
-    provider: "sportmonks",
-    data: allFixtures,
+    providerMode: apiFootballFixtures.length ? "hybrid" : "sportmonks",
+    data: combined,
+    sources: {
+      sportmonks: { configured: Boolean(env.SPORTMONKS_API_TOKEN), count: normalizedSportMonks.length },
+      apiFootball: { configured: apiFootballConfigured(env), count: apiFootballFixtures.length }
+    },
     meta: {
-      ...(firstData.meta || {}),
-      pagination: {
-        ...(pagination || {}),
-        total: allFixtures.length,
-        current_page: 1,
-        last_page: lastPage,
-        has_more: false
-      }
+      total: combined.length,
+      date,
+      timezone: "America/Sao_Paulo"
     }
   }, 200);
 }
 
 async function leagues(env) {
-  if (!env.SPORTMONKS_API_TOKEN) {
-    return json({ error: "SPORTMONKS_API_TOKEN nao esta configurado no Cloudflare." }, 500);
+  if (!env.SPORTMONKS_API_TOKEN && !apiFootballConfigured(env)) {
+    return json({ error: "Nenhum provedor de futebol esta configurado no Cloudflare." }, 500);
   }
 
-  const endpoint =
-    "https://api.sportmonks.com/v3/football/leagues" +
-    `?api_token=${encodeURIComponent(env.SPORTMONKS_API_TOKEN)}&include=currentSeason`;
-  const result = await fetchSportMonksJson(endpoint);
-
-  if (!result.ok) {
-    return json({
-      error: result.status === 504 ? result.data.error : "SportMonks retornou um erro ao buscar as ligas disponíveis.",
-      details: result.data
-    }, result.status);
+  let sportmonksLeagues = [];
+  if (env.SPORTMONKS_API_TOKEN) {
+    const endpoint =
+      "https://api.sportmonks.com/v3/football/leagues" +
+      `?api_token=${encodeURIComponent(env.SPORTMONKS_API_TOKEN)}&include=currentSeason`;
+    const result = await fetchSportMonksJson(endpoint);
+    if (result.ok) {
+      const data = result.data || {};
+      sportmonksLeagues = Array.isArray(data.data)
+        ? data.data.map(league => ({
+            provider: "sportmonks",
+            id: league.id,
+            name: league.name,
+            shortCode: league.short_code || null,
+            active: league.active !== false,
+            type: league.type || null,
+            subType: league.sub_type || null,
+            countryId: league.country_id ?? null,
+            currentSeasonId: league.currentseason?.id ?? league.currentSeason?.id ?? null
+          }))
+        : [];
+    }
   }
 
-  const data = result.data || {};
-  const sportmonksLeagues = Array.isArray(data.data)
-    ? data.data.map(league => ({
-        provider: "sportmonks",
-        id: league.id,
-        name: league.name,
-        shortCode: league.short_code || null,
-        active: league.active !== false,
-        type: league.type || null,
-        subType: league.sub_type || null,
-        countryId: league.country_id ?? null,
-        currentSeasonId: league.currentseason?.id ?? league.currentSeason?.id ?? null
-      }))
+  const apiFootball = apiFootballConfigured(env)
+    ? await apiFootballLeagues(env)
     : [];
-
-  let apiFootball = [];
-  if (apiFootballConfigured(env)) {
-    apiFootball = await apiFootballLeagues(env);
-  }
 
   return json({
     providerMode: apiFootball.length ? "hybrid" : "sportmonks",
@@ -201,10 +213,20 @@ async function leagues(env) {
 
 async function fixture(url, env) {
   const id = url.searchParams.get("id");
+  const provider = (url.searchParams.get("provider") || "sportmonks").toLowerCase();
+
+  if (!id || !/^\d+$/.test(id)) return json({ error: "Informe um fixture ID numerico." }, 400);
+
+  if (provider === "api-football") {
+    if (!apiFootballConfigured(env)) return json({ error: "API_FOOTBALL_KEY nao esta configurada no Cloudflare." }, 500);
+    const data = await apiFootballFixture(id, env);
+    if (!data) return json({ error: "API-Football nao encontrou o fixture solicitado." }, 404);
+    return json({ provider: "api-football", data }, 200);
+  }
+
   if (!env.SPORTMONKS_API_TOKEN) {
     return json({ error: "SPORTMONKS_API_TOKEN nao esta configurado no Cloudflare." }, 500);
   }
-  if (!id || !/^\d+$/.test(id)) return json({ error: "Informe um fixture ID numerico." }, 400);
 
   const include = "participants;league.country;league;state;statistics;events;lineups";
   const endpoint =
@@ -217,13 +239,25 @@ async function fixture(url, env) {
       details: result.data
     }, result.status);
   }
-  return json(result.data, 200);
+  return json({ provider: "sportmonks", ...result.data }, 200);
 }
 
 async function history(url, env) {
   const id = url.searchParams.get("fixture");
+  const provider = (url.searchParams.get("provider") || "sportmonks").toLowerCase();
   if (!id) return json({ error: "Informe o fixture ID." }, 400);
   if (!/^\d+$/.test(id)) return json({ error: "Fixture ID invalido." }, 400);
+
+  if (provider === "api-football") {
+    return json({
+      ok: false,
+      provider: "api-football",
+      version: "6.3.16",
+      error: "Historico API-Football sera ativado na proxima etapa de normalizacao do motor.",
+      diagnostic: { fixtureId: Number(id), provider, analysisAvailable: false }
+    }, 501);
+  }
+
   if (!env.SPORTMONKS_API_TOKEN) return json({ error: "SPORTMONKS_API_TOKEN nao esta configurado no Cloudflare." }, 500);
 
   const result = await historyCore(id, env.SPORTMONKS_API_TOKEN);
