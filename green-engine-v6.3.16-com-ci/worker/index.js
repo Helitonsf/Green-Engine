@@ -1,6 +1,7 @@
 import { historyCore } from "../cloudflare/history-core.js";
 import { apiFootballConfigured, apiFootballLeagues, apiFootballSports, apiFootballFixture } from "../cloudflare/providers/api-football.js";
 import { apiFootballHistory } from "../cloudflare/providers/api-football-history.js";
+import { enrichLeague, isAllowedLeague } from "../cloudflare/providers/league-catalog.js";
 
 const JSON_HEADERS = {
   "Content-Type": "application/json; charset=utf-8"
@@ -148,7 +149,7 @@ async function sports(url, env) {
       error: "Nenhum jogo encontrado para esta data nos provedores configurados.",
       sources: {
         sportmonks: { configured: Boolean(env.SPORTMONKS_API_TOKEN), count: 0, error: sportmonksError },
-        apiFootball: { configured: apiFootballConfigured(env), count: apiFootballFixtures.length, status: apiFootball?.diagnostic?.status ?? null, errors: apiFootball?.diagnostic?.errors ?? null }
+        apiFootball: { configured: apiFootballConfigured(env), count: 0, status: apiFootball?.diagnostic?.status ?? null, errors: apiFootball?.diagnostic?.errors ?? null }
       }
     }, 404);
   }
@@ -163,7 +164,8 @@ async function sports(url, env) {
     meta: {
       total: combined.length,
       date,
-      timezone: "America/Sao_Paulo"
+      timezone: "America/Sao_Paulo",
+      leagueFilter: "curated"
     }
   }, 200);
 }
@@ -191,8 +193,9 @@ async function leagues(env) {
             type: league.type || null,
             subType: league.sub_type || null,
             countryId: league.country_id ?? null,
+            countryName: league.country?.name || null,
             currentSeasonId: league.currentseason?.id ?? league.currentSeason?.id ?? null
-          }))
+          })).map(enrichLeague).filter(league => league.enabled)
         : [];
     }
   }
@@ -201,14 +204,22 @@ async function leagues(env) {
     ? await apiFootballLeagues(env)
     : [];
 
+  const apiFootballData = Array.isArray(apiFootball) ? apiFootball : [];
+  const data = [...sportmonksLeagues, ...apiFootballData];
+
   return json({
-    providerMode: apiFootball.length ? "hybrid" : "sportmonks",
+    providerMode: apiFootballData.length ? "hybrid" : "sportmonks",
     sources: {
       sportmonks: { configured: Boolean(env.SPORTMONKS_API_TOKEN), count: sportmonksLeagues.length },
-      apiFootball: { configured: apiFootballConfigured(env), count: apiFootball.length, status: apiFootball?.diagnostic?.status ?? null, errors: apiFootball?.diagnostic?.errors ?? null }
+      apiFootball: { configured: apiFootballConfigured(env), count: apiFootballData.length, status: apiFootball?.diagnostic?.status ?? null, errors: apiFootball?.diagnostic?.errors ?? null }
     },
-    data: [...sportmonksLeagues, ...apiFootball],
-    availableLeagueCount: sportmonksLeagues.length + apiFootball.length
+    data,
+    availableLeagueCount: data.length,
+    catalog: {
+      type: "curated",
+      genders: ["male", "female", "mixed"],
+      priorities: ["A", "B"]
+    }
   }, 200);
 }
 
@@ -221,7 +232,7 @@ async function fixture(url, env) {
   if (provider === "api-football") {
     if (!apiFootballConfigured(env)) return json({ error: "API_FOOTBALL_KEY nao esta configurada no Cloudflare." }, 500);
     const data = await apiFootballFixture(id, env);
-    if (!data) return json({ error: "API-Football nao encontrou o fixture solicitado." }, 404);
+    if (!data) return json({ error: "API-Football nao encontrou o fixture solicitado ou a liga nao esta no catalogo Green Engine." }, 404);
     return json({ provider: "api-football", data }, 200);
   }
 
@@ -240,80 +251,47 @@ async function fixture(url, env) {
       details: result.data
     }, result.status);
   }
-  return json({ provider: "sportmonks", ...result.data }, 200);
+
+  return json({ provider: "sportmonks", data: result.data?.data || null }, 200);
 }
 
 async function history(url, env) {
-  const id = url.searchParams.get("fixture");
+  const fixtureId = url.searchParams.get("fixture");
   const provider = (url.searchParams.get("provider") || "sportmonks").toLowerCase();
-  if (!id) return json({ error: "Informe o fixture ID." }, 400);
-  if (!/^\d+$/.test(id)) return json({ error: "Fixture ID invalido." }, 400);
+
+  if (!fixtureId || !/^\d+$/.test(fixtureId)) return json({ error: "Informe um fixture ID numerico." }, 400);
 
   if (provider === "api-football") {
-    const result = await apiFootballHistory(id, env);
-    return json(result.body, result.statusCode);
+    if (!apiFootballConfigured(env)) return json({ error: "API_FOOTBALL_KEY nao esta configurada no Cloudflare." }, 500);
+    const result = await apiFootballHistory(fixtureId, env);
+    return json(result, result?.error === "insufficient-data" ? 422 : 200);
   }
 
-  if (!env.SPORTMONKS_API_TOKEN) return json({ error: "SPORTMONKS_API_TOKEN nao esta configurado no Cloudflare." }, 500);
-
-  const result = await historyCore(id, env.SPORTMONKS_API_TOKEN);
-  return json(result.body, result.statusCode);
-}
-
-async function serveAsset(request, env) {
-  if (!env.ASSETS) return json({ ok: false, error: "ASSETS binding nao configurado." }, 500);
-  const response = await env.ASSETS.fetch(request);
-  const contentType = response.headers.get("Content-Type");
-  if (contentType && contentType.toLowerCase().startsWith("text/html") && !contentType.toLowerCase().includes("charset=")) {
-    const headers = new Headers(response.headers);
-    headers.set("Content-Type", "text/html; charset=utf-8");
-    return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
-  }
-  return response;
+  const result = await historyCore(fixtureId, env);
+  return json(result, result?.error === "insufficient-data" ? 422 : 200);
 }
 
 export default {
   async fetch(request, env, ctx) {
+    if (request.method === "OPTIONS") return cors(request, json({ ok: true }), env);
+
     const url = new URL(request.url);
-    if (request.method === "OPTIONS") return cors(request, new Response(null, { status: 204 }), env);
+    let response;
 
-    try {
-      if (url.pathname === "/api/health") {
-        return cors(request, json({
-          ok: true,
-          version: "6.3.16-CF",
-          sportmonksConfigured: Boolean(env.SPORTMONKS_API_TOKEN),
-          apiFootballConfigured: apiFootballConfigured(env),
-          providerMode: apiFootballConfigured(env) ? "hybrid-ready" : "sportmonks-only",
-          assetsConfigured: Boolean(env.ASSETS),
-          message: "Green Engine Cloudflare Worker ativo"
-        }), env);
-      }
-
-      if (url.pathname === "/api/sports") {
-        const response = await withCache(request, ctx, CACHE_TTL.sports, () => sports(url, env));
-        return cors(request, response, env);
-      }
-      if (url.pathname === "/api/leagues") {
-        const response = await withCache(request, ctx, CACHE_TTL.leagues, () => leagues(env));
-        return cors(request, response, env);
-      }
-      if (url.pathname === "/api/fixture") {
-        const response = await withCache(request, ctx, CACHE_TTL.fixture, () => fixture(url, env));
-        return cors(request, response, env);
-      }
-      if (url.pathname === "/api/history") {
-        const response = await withCache(request, ctx, CACHE_TTL.history, () => history(url, env));
-        return cors(request, response, env);
-      }
-
-      return await serveAsset(request, env);
-    } catch (error) {
-      return cors(request, json({
-        ok: false,
-        error: "Erro interno do Worker.",
-        details: error?.message || String(error)
-      }, 500), env);
+    if (url.pathname === "/api/sports") {
+      response = await withCache(request, ctx, CACHE_TTL.sports, () => sports(url, env));
+    } else if (url.pathname === "/api/leagues") {
+      response = await withCache(request, ctx, CACHE_TTL.leagues, () => leagues(env));
+    } else if (url.pathname === "/api/fixture") {
+      response = await withCache(request, ctx, CACHE_TTL.fixture, () => fixture(url, env));
+    } else if (url.pathname === "/api/history") {
+      response = await withCache(request, ctx, CACHE_TTL.history, () => history(url, env));
+    } else if (url.pathname === "/health") {
+      response = json({ ok: true, service: "green-engine-v6.3.16", timezone: "America/Sao_Paulo", leagueFilter: "curated" }, 200);
+    } else {
+      response = json({ error: "Rota nao encontrada." }, 404);
     }
+
+    return cors(request, response, env);
   }
 };
