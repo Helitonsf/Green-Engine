@@ -554,6 +554,53 @@ td.market-name{ white-space:normal; font-weight:800; }
   font-size:13.5px;
 }
 
+th.sortable{
+  cursor:pointer;
+  user-select:none;
+}
+
+th.sortable:hover{ color:var(--text); }
+
+th.sortable .sort-arrow{
+  display:inline-block;
+  margin-left:4px;
+  opacity:.4;
+  font-size:10px;
+}
+
+th.sortable.sort-active .sort-arrow{ opacity:1; color:var(--green2); }
+
+/* ---------------- SKELETONS (estado de carregamento) ---------------- */
+
+@keyframes skeleton-pulse{
+  0%,100%{ opacity:.55; }
+  50%{ opacity:1; }
+}
+
+.skeleton{
+  background:var(--panel2);
+  border-radius:6px;
+  animation:skeleton-pulse 1.3s ease-in-out infinite;
+}
+
+.skeleton-line{ height:12px; width:100%; }
+.skeleton-crest{ width:56px; height:56px; border-radius:50%; }
+.skeleton-team-name{ height:14px; width:80px; margin-top:2px; }
+
+tr.skeleton-row td{ padding:14px 10px; }
+
+.sr-only{
+  position:absolute;
+  width:1px;
+  height:1px;
+  padding:0;
+  margin:-1px;
+  overflow:hidden;
+  clip:rect(0,0,0,0);
+  white-space:nowrap;
+  border:0;
+}
+
 /* ---------------- HISTORY / SUREBET (mantidos, restilizados) ---------------- */
 
 .layout-history{
@@ -726,7 +773,7 @@ footer.bottombar strong{ color:var(--green2); }
       </div>
     </div>
 
-    <div id="statusPill" class="status-pill pending">AGUARDANDO ANÁLISE</div>
+    <div id="statusPill" class="status-pill pending" role="status" aria-live="polite">AGUARDANDO ANÁLISE</div>
 
     <div class="topbar-right">
       <span class="pill"><span class="muted">Versão</span> 6.3.16</span>
@@ -770,7 +817,7 @@ footer.bottombar strong{ color:var(--green2); }
 
       <button type="button" id="searchGamesBtn" class="block">Pesquisar jogos</button>
 
-      <div id="gamesSearchStatus" class="muted small" style="margin-top:12px;">
+      <div id="gamesSearchStatus" class="muted small" style="margin-top:12px;" role="status" aria-live="polite">
         Selecione uma data para pesquisar os jogos disponíveis.
       </div>
 
@@ -841,7 +888,8 @@ footer.bottombar strong{ color:var(--green2); }
   <!-- ===================== COLUNA CENTRAL ===================== -->
   <main class="content">
 
-    <div id="errorBanner"></div>
+    <div id="errorBanner" role="alert" aria-live="assertive"></div>
+    <span id="srStatus" class="sr-only" role="status" aria-live="polite"></span>
 
     <section class="top-row">
 
@@ -879,13 +927,13 @@ footer.bottombar strong{ color:var(--green2); }
         <table>
           <thead>
             <tr>
-              <th>Mercado</th>
-              <th>Prob. Modelo</th>
+              <th class="sortable" data-sort="market" tabindex="0" role="button" aria-label="Ordenar por mercado">Mercado <span class="sort-arrow">▲▼</span></th>
+              <th class="sortable" data-sort="probability" tabindex="0" role="button" aria-label="Ordenar por probabilidade do modelo">Prob. Modelo <span class="sort-arrow">▲▼</span></th>
               <th>Prob. Implícita</th>
-              <th>Odd Justa</th>
+              <th class="sortable" data-sort="odd" tabindex="0" role="button" aria-label="Ordenar por odd justa">Odd Justa <span class="sort-arrow">▲▼</span></th>
               <th>Odd Atual</th>
               <th>Valor</th>
-              <th>Confiança</th>
+              <th class="sortable sort-active" data-sort="confidence" tabindex="0" role="button" aria-label="Ordenar por confiança">Confiança <span class="sort-arrow">▲▼</span></th>
               <th>Recomendação</th>
             </tr>
           </thead>
@@ -1176,16 +1224,61 @@ function renderHistory(team, target){
   $(target).innerHTML = rows;
 }
 
-function renderMarketsTable(greenScore){
-  const markets = Array.isArray(greenScore?.markets) ? greenScore.markets : [];
-  $("marketsCount").textContent = markets.length;
-  $("valMarketsCount").textContent = markets.length || "—";
+let lastGreenScore = null;
+let sortState = { column: "confidence", direction: "desc" };
 
-  if(!markets.length){
+function sortMarkets(markets, state){
+  const list = [...markets];
+
+  const scoreOf = m => Number(m.confidenceScore ?? m.score ?? 0);
+  const oddOf = m => {
+    const p = Number(m.probability);
+    return Number.isFinite(p) && p > 0 ? 1 / p : Infinity;
+  };
+
+  const getters = {
+    market: m => String(m.market || "").toLowerCase(),
+    probability: m => Number(m.probability ?? 0),
+    odd: oddOf,
+    confidence: scoreOf
+  };
+
+  const getter = getters[state.column] || getters.confidence;
+
+  list.sort((a, b) => {
+    const av = getter(a);
+    const bv = getter(b);
+    if(av < bv) return state.direction === "asc" ? -1 : 1;
+    if(av > bv) return state.direction === "asc" ? 1 : -1;
+    return 0;
+  });
+
+  return list;
+}
+
+function updateSortHeaders(){
+  document.querySelectorAll("th.sortable").forEach(th => {
+    th.classList.toggle("sort-active", th.dataset.sort === sortState.column);
+  });
+}
+
+function renderMarketsTable(greenScore){
+  lastGreenScore = greenScore;
+
+  const allMarkets = Array.isArray(greenScore?.markets) ? greenScore.markets : [];
+  $("marketsCount").textContent = allMarkets.length;
+  $("valMarketsCount").textContent = allMarkets.length || "—";
+
+  if(!allMarkets.length){
     $("marketsTableBody").innerHTML =
       '<tr><td colspan="8" class="empty-state">Nenhum mercado disponível.</td></tr>';
     return;
   }
+
+  const markets = sortMarkets(allMarkets, sortState);
+  updateSortHeaders();
+
+  $("srStatus").textContent = `${allMarkets.length} mercados carregados.`;
 
   const recommended = greenScore?.recommendedMarket ?? null;
 
@@ -1386,6 +1479,7 @@ document.addEventListener("greenEngineFixtureSelected", async event => {
     $("summaryBanner").className = "summary-banner state-idle";
     $("summaryBannerText").textContent = "Analisando jogo selecionado…";
     showError(null);
+    showLoadingSkeletons();
 
     await loadFixture(String(id));
     await loadHistory(String(id));
@@ -1408,6 +1502,50 @@ document.addEventListener("greenEngineFixtureSelected", async event => {
     showError(error.message || "Falha ao carregar o fixture.");
   }
 });
+
+/* Ordenação por coluna na tabela de mercados */
+document.querySelectorAll("th.sortable").forEach(th => {
+  const activate = () => {
+    const column = th.dataset.sort;
+    if(sortState.column === column){
+      sortState.direction = sortState.direction === "asc" ? "desc" : "asc";
+    }else{
+      sortState = { column, direction: "desc" };
+    }
+    if(lastGreenScore) renderMarketsTable(lastGreenScore);
+  };
+
+  th.addEventListener("click", activate);
+  th.addEventListener("keydown", e => {
+    if(e.key === "Enter" || e.key === " "){
+      e.preventDefault();
+      activate();
+    }
+  });
+});
+
+/* ---------------- SKELETONS DE CARREGAMENTO ---------------- */
+
+function showLoadingSkeletons(){
+  $("homeCrest").innerHTML = '<div class="skeleton skeleton-crest"></div>';
+  $("awayCrest").innerHTML = '<div class="skeleton skeleton-crest"></div>';
+  $("fixtureHomeName").innerHTML = '<div class="skeleton skeleton-team-name"></div>';
+  $("fixtureAwayName").innerHTML = '<div class="skeleton skeleton-team-name"></div>';
+  $("fixtureMeta").innerHTML = '<div class="skeleton skeleton-line" style="max-width:220px;margin:0 auto;"></div>';
+
+  $("recommendedCard").classList.add("is-empty");
+  $("recommendedMarketName").innerHTML = '<div class="skeleton skeleton-line" style="max-width:160px;margin:0 auto;"></div>';
+  $("recommendedConfidence").textContent = "—";
+  $("recommendedOdd").textContent = "—";
+
+  $("marketsTableBody").innerHTML = Array.from({ length: 4 }).map(() => `
+    <tr class="skeleton-row">
+      <td colspan="8"><div class="skeleton skeleton-line"></div></td>
+    </tr>
+  `).join("");
+
+  updateGauge(null, null);
+}
 
 /* Filtro local (client-side) sobre a lista de jogos já carregada */
 (function setupQuickFilter(){
