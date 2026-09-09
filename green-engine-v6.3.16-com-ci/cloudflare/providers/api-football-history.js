@@ -4,6 +4,7 @@ const API_FOOTBALL_BASE = "https://v3.football.api-sports.io";
 const FETCH_TIMEOUT_MS = 10000;
 const HISTORY_CANDIDATES = 15;
 const REQUIRED_HISTORY = 5;
+const MAX_DETAIL_FIXTURES = 20;
 
 async function apiFetch(path, apiKey) {
   const controller = new AbortController();
@@ -152,11 +153,9 @@ export async function apiFootballHistory(id, env) {
   const candidates = [
     ...(Array.isArray(homeCandidates.data?.response) ? homeCandidates.data.response : []),
     ...(Array.isArray(awayCandidates.data?.response) ? awayCandidates.data.response : [])
-  ]
-    .filter(item => isBeforeFixture(item, fixture))
-    .sort((a, b) => new Date(b?.fixture?.date || 0) - new Date(a?.fixture?.date || 0));
+  ].filter(item => isBeforeFixture(item, fixture));
 
-  const ids = [...new Set(candidates.map(item => Number(item?.fixture?.id)).filter(Boolean))].slice(0, 20);
+  const ids = [...new Set(candidates.map(item => Number(item?.fixture?.id)).filter(Boolean))].slice(0, MAX_DETAIL_FIXTURES);
   if (!ids.length) {
     return { statusCode: 422, body: { ok: false, provider: "api-football", error: "Historico API-Football indisponivel antes do fixture.", diagnostic: { homeHistoryCount: 0, awayHistoryCount: 0, requiredPerTeam: REQUIRED_HISTORY } } };
   }
