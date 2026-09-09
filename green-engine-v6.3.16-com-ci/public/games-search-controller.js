@@ -196,32 +196,40 @@
 (function installDashboardMarketPolish() {
   const style = document.createElement("style");
   style.textContent = `
+    /* Contraste nítido: sem sombra em texto branco, que estava criando
+       aparência borrada em alguns monitores/navegadores. */
     .markets-table th {
-      color: #f8fafc !important;
+      color: #ffffff !important;
       font-weight: 800 !important;
-      text-shadow: 0 1px 1px rgba(0,0,0,.35);
+      text-shadow: none !important;
+      opacity: 1 !important;
     }
     .markets-table tbody td {
-      color: #eef2f7 !important;
-      font-weight: 600;
+      color: #f1f5f9 !important;
+      font-weight: 650 !important;
+      text-shadow: none !important;
+      opacity: 1 !important;
     }
     .markets-table tbody tr:nth-child(even) td {
-      background: rgba(255,255,255,.025);
+      background: rgba(255,255,255,.018);
     }
     .markets-table tbody tr:hover td {
-      background: rgba(255,255,255,.055);
+      background: rgba(255,255,255,.045);
     }
     .markets-table td.market-name {
       color: #ffffff !important;
-      font-weight: 750 !important;
+      font-weight: 800 !important;
+      text-shadow: none !important;
     }
     .markets-table td.muted {
-      color: #cbd5e1 !important;
+      color: #dbe4ee !important;
       opacity: 1 !important;
+      text-shadow: none !important;
     }
     .markets-table .badge-pill {
       font-weight: 800 !important;
       letter-spacing: .02em;
+      text-shadow: none !important;
     }
   `;
   document.head.appendChild(style);
