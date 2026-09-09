@@ -2,7 +2,7 @@ import { normalizeGreenScoreOutput, calculateGreenScore } from "../history-core.
 
 const API_FOOTBALL_BASE = "https://v3.football.api-sports.io";
 const FETCH_TIMEOUT_MS = 10000;
-const HISTORY_CANDIDATES = 10;
+const HISTORY_CANDIDATES = 15;
 const REQUIRED_HISTORY = 5;
 
 async function apiFetch(path, apiKey) {
@@ -152,7 +152,9 @@ export async function apiFootballHistory(id, env) {
   const candidates = [
     ...(Array.isArray(homeCandidates.data?.response) ? homeCandidates.data.response : []),
     ...(Array.isArray(awayCandidates.data?.response) ? awayCandidates.data.response : [])
-  ].filter(item => isBeforeFixture(item, fixture));
+  ]
+    .filter(item => isBeforeFixture(item, fixture))
+    .sort((a, b) => new Date(b?.fixture?.date || 0) - new Date(a?.fixture?.date || 0));
 
   const ids = [...new Set(candidates.map(item => Number(item?.fixture?.id)).filter(Boolean))].slice(0, 20);
   if (!ids.length) {
