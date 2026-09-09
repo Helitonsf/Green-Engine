@@ -81,6 +81,44 @@
     return `${String(league.id ?? "")}::${String(league.name ?? "")}`;
   }
 
+  function normalizeLeagueValue(value) {
+    return String(value || "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  }
+
+  function enrichGameLeague(game) {
+    const league = game?.league;
+    if (!league) return game;
+
+    const byId = league.id != null
+      ? availableLeagues.find(item => String(item?.id) === String(league.id))
+      : null;
+
+    const byNameCountry = availableLeagues.find(item =>
+      normalizeLeagueValue(item?.name) === normalizeLeagueValue(league?.name) &&
+      (!league?.country || !item?.countryName ||
+        normalizeLeagueValue(item.countryName) === normalizeLeagueValue(league.country))
+    );
+
+    const match = byId || byNameCountry;
+    if (!match) return game;
+
+    return {
+      ...game,
+      league: {
+        ...league,
+        ...match,
+        id: league.id ?? match.id,
+        name: league.name ?? match.name,
+        country: league.country ?? match.countryName ?? match.country ?? null
+      }
+    };
+  }
+
   function renderLeagueOptions(games) {
     const byKey = new Map();
     games.forEach(game => {
@@ -191,6 +229,7 @@
     clearGames();
 
     try {
+      await loadLeagueCatalog();
       const response = await fetch(
         `/api/sports?date=${encodeURIComponent(selectedDate)}`,
         { method: "GET", headers: { "Accept": "application/json" } }
@@ -207,7 +246,9 @@
       else if (Array.isArray(data.fixtures)) games = data.fixtures;
       else if (Array.isArray(data.results)) games = data.results;
 
-      lastGames = games.filter(game => game?.league?.enabled !== false);
+      lastGames = games
+        .filter(game => game?.league?.enabled !== false)
+        .map(enrichGameLeague);
       renderLeagueOptions(lastGames);
       renderGames(getFilteredGames());
     } catch (error) {
