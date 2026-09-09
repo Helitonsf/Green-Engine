@@ -1,5 +1,44 @@
-﻿(function () {
+(function () {
   "use strict";
+
+  /*
+   * O dashboard pode ser publicado no GitHub Pages, enquanto a API continua
+   * no Cloudflare Worker. Mantemos os fetches existentes com /api/* e apenas
+   * redirecionamos esses caminhos para o Worker quando a interface estiver
+   * fora da origem do Worker.
+   */
+  const GREEN_ENGINE_API_BASE =
+    "https://green-engine-v6-3-15-cf.gerenteheliton.workers.dev";
+
+  const originalFetch = window.fetch.bind(window);
+
+  window.fetch = function (input, init) {
+    try {
+      const requestUrl =
+        typeof input === "string"
+          ? input
+          : input && typeof input.url === "string"
+            ? input.url
+            : "";
+
+      if (requestUrl.startsWith("/api/")) {
+        const targetUrl = GREEN_ENGINE_API_BASE + requestUrl;
+
+        if (typeof input === "string") {
+          return originalFetch(targetUrl, init);
+        }
+
+        return originalFetch(
+          new Request(targetUrl, input),
+          init
+        );
+      }
+    } catch (error) {
+      console.warn("[Green Engine] Falha ao redirecionar API:", error);
+    }
+
+    return originalFetch(input, init);
+  };
 
   const dateInput = document.getElementById("gameDate");
   const searchButton = document.getElementById("searchGamesBtn");
