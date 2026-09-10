@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
     paths:
+      - 'index.html'
+      - 'games-search-controller.js'
       - 'green-engine-v6.3.16-com-ci/public/**'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
@@ -33,7 +35,7 @@ jobs:
       - name: Upload dashboard artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: green-engine-v6.3.16-com-ci/public
+          path: .
 
       - name: Deploy to GitHub Pages
         id: deployment
