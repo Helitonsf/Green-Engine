@@ -16,7 +16,7 @@
     } catch (error) {
       console.warn("[Green Engine] Redirecionamento da API falhou:", error);
     }
-    return originalFetch(input, init);
+    return originalFetch(input);
   };
 
   const dateInput = document.getElementById("gameDate");
@@ -62,6 +62,7 @@
       item.textContent = `${home} × ${away} · ${league}`;
       item.dataset.fixtureId = fixtureId != null ? String(fixtureId) : "";
       item.dataset.provider = provider;
+      item.style.color = "var(--text)";
 
       if (fixtureId != null) {
         item.addEventListener("click", () => {
