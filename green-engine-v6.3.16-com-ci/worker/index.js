@@ -267,8 +267,8 @@ async function history(url, env) {
     return json(result, result?.error === "insufficient-data" ? 422 : 200);
   }
 
-  const result = await historyCore(fixtureId, env);
-  return json(result, result?.error === "insufficient-data" ? 422 : 200);
+  const result = await historyCore(fixtureId, env.SPORTMONKS_API_TOKEN);
+  return json(result.body, result.statusCode);
 }
 
 export default {
