@@ -62,6 +62,10 @@
       item.textContent = `${home} × ${away} · ${league}`;
       item.dataset.fixtureId = fixtureId != null ? String(fixtureId) : "";
       item.dataset.provider = provider;
+      item.style.color = "var(--text)";
+      item.style.textAlign = "left";
+      item.style.width = "100%";
+      item.style.background = "#0a0e14";
 
       if (fixtureId != null) {
         item.addEventListener("click", () => {
