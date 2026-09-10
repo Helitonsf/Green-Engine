@@ -229,7 +229,7 @@
     clearGames();
 
     try {
-      await loadLeagueCatalog();
+      const leagueCatalogPromise = loadLeagueCatalog();
       const response = await fetch(
         `/api/sports?date=${encodeURIComponent(selectedDate)}`,
         { method: "GET", headers: { "Accept": "application/json" } }
@@ -249,6 +249,11 @@
       lastGames = games
         .filter(game => game?.league?.enabled !== false)
         .map(enrichGameLeague);
+      renderLeagueOptions(lastGames);
+      renderGames(getFilteredGames());
+
+      await leagueCatalogPromise;
+      lastGames = lastGames.map(enrichGameLeague);
       renderLeagueOptions(lastGames);
       renderGames(getFilteredGames());
     } catch (error) {
