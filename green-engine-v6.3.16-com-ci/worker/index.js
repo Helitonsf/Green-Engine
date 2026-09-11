@@ -106,7 +106,7 @@ async function sports(url, env) {
     const baseEndpoint =
       `https://api.sportmonks.com/v3/football/fixtures/date/${date}` +
       `?api_token=${encodeURIComponent(env.SPORTMONKS_API_TOKEN)}` +
-      `&per_page=50&page=1&timezone=America/Sao_Paulo&include=participants`;
+      `&per_page=50&page=1&timezone=America/Sao_Paulo&include=participants;league`;
 
     const firstResult = await fetchSportMonksJson(baseEndpoint);
     if (firstResult.ok) {
@@ -119,7 +119,7 @@ async function sports(url, env) {
         const pageEndpoint =
           `https://api.sportmonks.com/v3/football/fixtures/date/${date}` +
           `?api_token=${encodeURIComponent(env.SPORTMONKS_API_TOKEN)}` +
-          `&per_page=50&page=${page}&timezone=America/Sao_Paulo&include=participants`;
+          `&per_page=50&page=${page}&timezone=America/Sao_Paulo&include=participants;league`;
         const pageResult = await fetchSportMonksJson(pageEndpoint);
         if (!pageResult.ok) {
           sportmonksError = pageResult.data;
