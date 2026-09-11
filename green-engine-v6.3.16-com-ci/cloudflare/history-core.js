@@ -14,8 +14,7 @@ function poissonCdf(k, lambda) {
 }
 
 function poissonOver(threshold, lambda) {
-  const line = Number(threshold) || 0;
-  return clamp(1 - poissonCdf(Math.floor(line), lambda));
+  return clamp(1 - poissonCdf(Math.floor(Number(threshold) || 0), lambda));
 }
 
 function numeric(value) {
@@ -32,9 +31,7 @@ function statValues(history, categories) {
   const wanted = new Set(categories);
   const values = [];
   for (const match of allMatches(history)) {
-    const rows = Array.isArray(match?.statisticsNormalized)
-      ? match.statisticsNormalized
-      : [];
+    const rows = Array.isArray(match?.statisticsNormalized) ? match.statisticsNormalized : [];
     for (const row of rows) {
       if (wanted.has(row?.category) && numeric(row?.value) != null) values.push(numeric(row.value));
     }
@@ -43,18 +40,15 @@ function statValues(history, categories) {
 }
 
 function combinedStatValues(homeHistory, awayHistory, categories) {
-  return [
-    ...statValues(homeHistory, categories),
-    ...statValues(awayHistory, categories)
-  ];
-}
-
-function rate(values, predicate) {
-  return values.length ? values.filter(predicate).length / values.length : null;
+  return [...statValues(homeHistory, categories), ...statValues(awayHistory, categories)];
 }
 
 function average(values) {
   return values.length ? values.reduce((a, b) => a + b, 0) / values.length : null;
+}
+
+function rate(values, predicate) {
+  return values.length ? values.filter(predicate).length / values.length : null;
 }
 
 function consistency(values) {
@@ -63,7 +57,7 @@ function consistency(values) {
   if (!avg) return 0.55;
   const variance = values.reduce((sum, value) => sum + (value - avg) ** 2, 0) / values.length;
   const cv = Math.sqrt(variance) / Math.max(Math.abs(avg), 1);
-  return clamp(1 - cv / 1.5, 0, 1);
+  return clamp(1 - cv / 1.5);
 }
 
 function empirical(values, predicate, fallback = 0.5) {
@@ -71,52 +65,41 @@ function empirical(values, predicate, fallback = 0.5) {
   return r == null ? fallback : r;
 }
 
-function goalsTotalMatches(homeHistory, awayHistory) {
-  const home = allMatches(homeHistory);
-  const away = allMatches(awayHistory);
-  return [...home, ...away].map(match => Number(match.goalsFor || 0) + Number(match.goalsAgainst || 0));
-}
-
-function marketResult(probability, sample, agreement, stability, uncertainty) {
+function confidenceScore(probability, sample, agreement, stability, uncertainty) {
   const p = clamp(probability);
   const sampleFactor = clamp(sample / 10);
-  const score = clamp(
-    100 * (
-      0.50 * p +
-      0.15 * sampleFactor +
-      0.15 * agreement +
-      0.12 * stability +
-      0.08 * (1 - uncertainty)
-    ),
-    0,
-    100
-  );
+  return clamp(100 * (
+    0.50 * p +
+    0.15 * sampleFactor +
+    0.15 * clamp(agreement) +
+    0.12 * clamp(stability) +
+    0.08 * (1 - clamp(uncertainty))
+  ), 0, 100);
+}
+
+function buildMarket(market, probability, observations, modelProbability = probability) {
+  const p = clamp(probability);
+  const values = Array.isArray(observations) ? observations : [];
+  const agreement = clamp(1 - Math.abs(clamp(modelProbability) - p));
+  const stability = consistency(values);
+  const uncertainty = values.length ? clamp(1 / Math.sqrt(values.length)) : 1;
+  const score = confidenceScore(p, values.length, agreement, stability, uncertainty);
   return {
-    probability: round(p * 100, 2),
+    market,
+    probability: round(p),
     score: round(score, 1),
     confidenceScore: round(score, 1),
-    sample,
+    sample: values.length,
     agreement: round(agreement * 100, 1),
     stability: round(stability * 100, 1),
     uncertainty: round(uncertainty * 100, 1),
+    fairOdd: p > 0 ? round(1 / p, 2) : null,
     oddsInfluence: false
   };
 }
 
-function buildMarket(market, probability, values, sample, modelProbability = probability) {
-  const empiricalProbability = clamp(probability);
-  const agreement = clamp(1 - Math.abs(clamp(modelProbability) - empiricalProbability));
-  const stability = consistency(values);
-  const uncertainty = values.length ? clamp(1 / Math.sqrt(values.length)) : 1;
-  return {
-    market,
-    ...marketResult(empiricalProbability, sample, agreement, stability, uncertainty),
-    fairOdd: empiricalProbability > 0 ? round(1 / empiricalProbability, 2) : null
-  };
-}
-
-function normalizeGreenScoreOutput(score) {
-  const markets = Array.isArray(score?.markets)
+export function normalizeGreenScoreOutput(score = {}) {
+  const markets = Array.isArray(score.markets)
     ? score.markets.map(market => ({
         ...market,
         probability: numeric(market?.probability) ?? 0,
@@ -125,19 +108,21 @@ function normalizeGreenScoreOutput(score) {
         oddsInfluence: false
       }))
     : [];
-  const ranked = [...markets].sort((a, b) => Number(b.confidenceScore) - Number(a.confidenceScore));
-  const top = ranked[0] || null;
-  const second = ranked[1] || null;
-  const gap = top && second ? Number(top.confidenceScore) - Number(second.confidenceScore) : 0;
-  const recommended = top && top.confidenceScore >= 70 && top.probability >= 70 && gap >= 3 ? top.market : null;
+  const ranking = [...markets].sort((a, b) => Number(b.confidenceScore) - Number(a.confidenceScore));
+  const top = ranking[0] || null;
+  const second = ranking[1] || null;
+  const scoreGap = top && second ? Number(top.confidenceScore) - Number(second.confidenceScore) : 0;
+  const recommendedMarket = top && top.confidenceScore >= 70 && top.probability >= 0.70 && scoreGap >= 3
+    ? top.market
+    : null;
   return {
     ...score,
-    markets: ranked,
-    ranking: ranked,
-    recommendedMarket: recommended,
-    confidenceScore: top ? top.confidenceScore : 0,
-    probability: top ? top.probability : 0,
-    scoreGap: round(gap, 1),
+    markets: ranking,
+    ranking,
+    recommendedMarket,
+    confidenceScore: top?.confidenceScore ?? 0,
+    probability: top?.probability ?? 0,
+    scoreGap: round(scoreGap, 1),
     oddsInfluence: false,
     confidenceMethod: "sample + consistency + agreement + stability + uncertainty"
   };
@@ -146,63 +131,66 @@ function normalizeGreenScoreOutput(score) {
 export function calculateGreenScore(homeHistory = {}, awayHistory = {}, homeVenueMatches = [], awayVenueMatches = []) {
   const homeMatches = allMatches(homeHistory);
   const awayMatches = allMatches(awayHistory);
-  const allGoals = goalsTotalMatches(homeHistory, awayHistory);
-  const sample = homeMatches.length + awayMatches.length;
+  const allMatchesCombined = [...homeMatches, ...awayMatches];
+  const sample = allMatchesCombined.length;
   const homeGoalsFor = homeMatches.map(m => Number(m.goalsFor || 0));
   const homeGoalsAgainst = homeMatches.map(m => Number(m.goalsAgainst || 0));
   const awayGoalsFor = awayMatches.map(m => Number(m.goalsFor || 0));
   const awayGoalsAgainst = awayMatches.map(m => Number(m.goalsAgainst || 0));
+  const allGoals = allMatchesCombined.map(m => Number(m.goalsFor || 0) + Number(m.goalsAgainst || 0));
 
   const lambdaHome = Math.max(0.05, ((average(homeGoalsFor) ?? 1) + (average(awayGoalsAgainst) ?? 1)) / 2);
   const lambdaAway = Math.max(0.05, ((average(awayGoalsFor) ?? 1) + (average(homeGoalsAgainst) ?? 1)) / 2);
   const lambdaTotal = lambdaHome + lambdaAway;
 
-  const goals = [
-    buildMarket("Mais de 1.5 gols", poissonOver(1.5, lambdaTotal), allGoals, sample, poissonOver(1.5, lambdaTotal)),
-    buildMarket("Mais de 2.5 gols", poissonOver(2.5, lambdaTotal), allGoals, sample, poissonOver(2.5, lambdaTotal)),
-    buildMarket("Menos de 2.5 gols", 1 - poissonOver(2.5, lambdaTotal), allGoals, sample, 1 - poissonOver(2.5, lambdaTotal)),
-    buildMarket("Menos de 3.5 gols", 1 - poissonOver(3.5, lambdaTotal), allGoals, sample, 1 - poissonOver(3.5, lambdaTotal))
+  const markets = [
+    buildMarket("Mais de 1.5 gols", poissonOver(1.5, lambdaTotal), allGoals),
+    buildMarket("Mais de 2.5 gols", poissonOver(2.5, lambdaTotal), allGoals),
+    buildMarket("Menos de 2.5 gols", 1 - poissonOver(2.5, lambdaTotal), allGoals),
+    buildMarket("Menos de 3.5 gols", 1 - poissonOver(3.5, lambdaTotal), allGoals)
   ];
 
-  const bttsValues = [...homeMatches, ...awayMatches].map(m => [Number(m.goalsFor || 0), Number(m.goalsAgainst || 0)]);
-  const btts = empirical(bttsValues, pair => pair[0] > 0 && pair[1] > 0, 0.5);
-  const bttsNo = 1 - btts;
-  const bttsMarkets = [
-    buildMarket("Ambas marcam", btts, bttsValues.map(v => v[0] + v[1]), sample, btts),
-    buildMarket("Ambas não marcam", bttsNo, bttsValues.map(v => v[0] + v[1]), sample, bttsNo)
-  ];
+  const bttsObservations = allMatchesCombined.map(m => Number(m.goalsFor || 0) > 0 && Number(m.goalsAgainst || 0) > 0);
+  const btts = empirical(bttsObservations, Boolean, 0.5);
+  markets.push(
+    buildMarket("Ambas marcam", btts, bttsObservations.map(Boolean)),
+    buildMarket("Ambas não marcam", 1 - btts, bttsObservations.map(Boolean))
+  );
 
-  const homePlus = empirical(homeGoalsFor, value => value >= 0, 1);
-  const awayPlus = empirical(awayGoalsFor, value => value >= 0, 1);
-  const doubleChance = [
-    buildMarket("Casa +0.5", homePlus, homeGoalsFor, homeMatches.length, homePlus),
-    buildMarket("Fora +0.5", awayPlus, awayGoalsFor, awayMatches.length, awayPlus)
-  ];
+  const homeDcMatches = (Array.isArray(homeVenueMatches) && homeVenueMatches.length ? homeVenueMatches : homeMatches);
+  const awayDcMatches = (Array.isArray(awayVenueMatches) && awayVenueMatches.length ? awayVenueMatches : awayMatches);
+  const homeDc = empirical(homeDcMatches, m => ["W", "D"].includes(m?.result), 0.5);
+  const awayDc = empirical(awayDcMatches, m => ["W", "D"].includes(m?.result), 0.5);
+  markets.push(
+    buildMarket("Casa +0.5", homeDc, homeDcMatches.map(m => ["W", "D"].includes(m?.result))),
+    buildMarket("Fora +0.5", awayDc, awayDcMatches.map(m => ["W", "D"].includes(m?.result)))
+  );
 
   const corners = combinedStatValues(homeHistory, awayHistory, ["corners"]);
-  const cornerMarkets = [
-    buildMarket("Escanteios Over 7.5", empirical(corners, v => v >= 8, 0.5), corners, corners.length, poissonOver(7.5, average(corners) ?? 9)),
-    buildMarket("Escanteios Over 8.5", empirical(corners, v => v >= 9, 0.5), corners, corners.length, poissonOver(8.5, average(corners) ?? 9)),
-    buildMarket("Escanteios Over 10.5", empirical(corners, v => v >= 11, 0.5), corners, corners.length, poissonOver(10.5, average(corners) ?? 9)),
-    buildMarket("Escanteios Under 12.5", empirical(corners, v => v <= 12, 0.5), corners, corners.length, 1 - poissonOver(12.5, average(corners) ?? 9))
-  ];
+  const cornerAvg = average(corners) ?? 9;
+  markets.push(
+    buildMarket("Escanteios Over 7.5", empirical(corners, v => v >= 8, 0.5), corners, poissonOver(7.5, cornerAvg)),
+    buildMarket("Escanteios Over 8.5", empirical(corners, v => v >= 9, 0.5), corners, poissonOver(8.5, cornerAvg)),
+    buildMarket("Escanteios Over 10.5", empirical(corners, v => v >= 11, 0.5), corners, poissonOver(10.5, cornerAvg)),
+    buildMarket("Escanteios Under 12.5", empirical(corners, v => v <= 12, 0.5), corners, 1 - poissonOver(12.5, cornerAvg))
+  );
 
   const yellow = combinedStatValues(homeHistory, awayHistory, ["yellowCards"]);
-  const yellowMarkets = [
-    buildMarket("Cartões amarelos Over 2.5", empirical(yellow, v => v >= 3, 0.5), yellow, yellow.length, poissonOver(2.5, average(yellow) ?? 4)),
-    buildMarket("Cartões amarelos Over 3.5", empirical(yellow, v => v >= 4, 0.5), yellow, yellow.length, poissonOver(3.5, average(yellow) ?? 4)),
-    buildMarket("Cartões amarelos Over 4.5", empirical(yellow, v => v >= 5, 0.5), yellow, yellow.length, poissonOver(4.5, average(yellow) ?? 4)),
-    buildMarket("Cartões amarelos Under 6.5", empirical(yellow, v => v <= 6, 0.5), yellow, yellow.length, 1 - poissonOver(6.5, average(yellow) ?? 4))
-  ];
+  const yellowAvg = average(yellow) ?? 4;
+  markets.push(
+    buildMarket("Cartões amarelos Over 2.5", empirical(yellow, v => v >= 3, 0.5), yellow, poissonOver(2.5, yellowAvg)),
+    buildMarket("Cartões amarelos Over 3.5", empirical(yellow, v => v >= 4, 0.5), yellow, poissonOver(3.5, yellowAvg)),
+    buildMarket("Cartões amarelos Over 4.5", empirical(yellow, v => v >= 5, 0.5), yellow, poissonOver(4.5, yellowAvg)),
+    buildMarket("Cartões amarelos Under 6.5", empirical(yellow, v => v <= 6, 0.5), yellow, 1 - poissonOver(6.5, yellowAvg))
+  );
 
-  const markets = [...goals, ...bttsMarkets, ...doubleChance, ...cornerMarkets, ...yellowMarkets];
   return normalizeGreenScoreOutput({
     markets,
     samplePerTeam: { home: homeMatches.length, away: awayMatches.length },
     venueSamples: { home: homeVenueMatches.length, away: awayVenueMatches.length },
-    oddsInfluence: false,
     source: "API-Football",
-    provider: "api-football"
+    provider: "api-football",
+    oddsInfluence: false
   });
 }
 
