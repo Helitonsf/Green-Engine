@@ -126,7 +126,7 @@ export async function apiFootballSports(date, env) {
 export async function apiFootballFixture(id, env) {
   if (!env.API_FOOTBALL_KEY) return null;
   const result = await apiFetch(
-    `/fixtures?id=${encodeURIComponent(id)}`,
+    `/fixtures?ids=${encodeURIComponent(id)}`,
     env.API_FOOTBALL_KEY
   );
   if (!result.ok || !Array.isArray(result.data?.response) || !result.data.response[0]) {
