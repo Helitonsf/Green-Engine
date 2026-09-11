@@ -113,7 +113,7 @@ export async function apiFootballSports(date, env) {
     env.API_FOOTBALL_KEY
   );
   const data = result.ok && Array.isArray(result.data?.response)
-    ? result.data.response.map(normalizeFixture).filter(fixture => fixture.league?.enabled)
+    ? result.data.response.map(normalizeFixture)
     : [];
   return {
     provider: "api-football",
@@ -132,6 +132,5 @@ export async function apiFootballFixture(id, env) {
   if (!result.ok || !Array.isArray(result.data?.response) || !result.data.response[0]) {
     return null;
   }
-  const fixture = normalizeFixture(result.data.response[0]);
-  return fixture.league?.enabled ? fixture : null;
+  return normalizeFixture(result.data.response[0]);
 }
