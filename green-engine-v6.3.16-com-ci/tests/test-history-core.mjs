@@ -1,41 +1,45 @@
 import assert from "node:assert/strict";
-import { historyCore } from "../cloudflare/history-core.js";
+import { calculateGreenScore, normalizeGreenScoreOutput } from "../cloudflare/history-core.js";
 
-console.log("=== TESTE 1 — SEM TOKEN ===");
+const makeMatch = (id, goalsFor, goalsAgainst, corners = 9, yellowCards = 4) => ({
+  id,
+  goalsFor,
+  goalsAgainst,
+  result: goalsFor > goalsAgainst ? "W" : goalsFor < goalsAgainst ? "L" : "D",
+  statisticsNormalized: [
+    { category: "corners", value: corners },
+    { category: "yellowCards", value: yellowCards }
+  ]
+});
 
-const result1 = await historyCore(
-  "19722813",
-  ""
-);
+const homeMatches = [
+  makeMatch(1, 2, 0, 10, 3),
+  makeMatch(2, 1, 1, 9, 4),
+  makeMatch(3, 3, 1, 11, 5),
+  makeMatch(4, 0, 1, 8, 2),
+  makeMatch(5, 2, 2, 10, 4)
+];
 
-console.log(JSON.stringify(result1, null, 2));
+const awayMatches = [
+  makeMatch(6, 0, 2, 8, 3),
+  makeMatch(7, 1, 1, 9, 4),
+  makeMatch(8, 2, 3, 12, 5),
+  makeMatch(9, 2, 0, 10, 4),
+  makeMatch(10, 1, 2, 9, 3)
+];
 
-console.log("");
-console.log("=== TESTE 2 — ID INVÁLIDO ===");
+const homeHistory = { matches: homeMatches, sampleSize: 5 };
+const awayHistory = { matches: awayMatches, sampleSize: 5 };
 
-const result2 = await historyCore(
-  "abc",
-  ""
-);
+const score = calculateGreenScore(homeHistory, awayHistory, homeMatches, awayMatches);
+const normalized = normalizeGreenScoreOutput(score);
 
-console.log(JSON.stringify(result2, null, 2));
+assert.equal(normalized.oddsInfluence, false);
+assert.equal(normalized.markets.length, 14);
+assert.ok(normalized.markets.every(m => Number(m.probability) >= 0 && Number(m.probability) <= 1));
+assert.ok(normalized.markets.every(m => Number(m.confidenceScore) >= 0 && Number(m.confidenceScore) <= 100));
+assert.ok(normalized.markets.some(m => m.market === "Escanteios Over 8.5"));
+assert.ok(normalized.markets.some(m => m.market === "Cartões amarelos Over 3.5"));
+assert.ok(normalized.ranking.length === normalized.markets.length);
 
-console.log("");
-console.log("=== TESTE 3 — ID AUSENTE ===");
-
-const result3 = await historyCore(
-  null,
-  ""
-);
-
-console.log(JSON.stringify(result3, null, 2));
-
-// A checagem de token acontece antes da checagem de ID, então mesmo os
-// casos "ID inválido"/"ID ausente" retornam 500 (token) enquanto o token
-// estiver vazio — é o comportamento real, não um bug deste teste.
-assert.equal(result1.statusCode, 500, "sem token deveria retornar 500");
-assert.equal(result2.statusCode, 500, "sem token (ID inválido) deveria retornar 500");
-assert.equal(result3.statusCode, 500, "sem token (ID ausente) deveria retornar 500");
-assert.match(result1.body.error, /SPORTMONKS_API_TOKEN/, "mensagem deveria citar o token ausente");
-
-console.log("\n✅ test-history-core: todos os asserts passaram.");
+console.log("\n✅ test-history-core: cálculo API-Football e ranking validados sem odds.");
