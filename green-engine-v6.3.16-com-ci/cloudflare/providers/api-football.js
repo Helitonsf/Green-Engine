@@ -104,6 +104,32 @@ export async function apiFootballLeagues(env) {
   return data;
 }
 
+export async function apiFootballBetTypes(env) {
+  if (!env.API_FOOTBALL_KEY) {
+    return {
+      provider: "api-football",
+      results: 0,
+      data: [],
+      diagnostic: { status: null, errors: { configuration: "API_FOOTBALL_KEY ausente" } }
+    };
+  }
+
+  const result = await apiFetch("/odds/bets", env.API_FOOTBALL_KEY);
+  const data = result.ok && Array.isArray(result.data?.response)
+    ? result.data.response.map(item => ({
+        id: Number(item?.id ?? 0) || null,
+        name: item?.name ?? null
+      })).filter(item => item.id && item.name)
+    : [];
+
+  return {
+    provider: "api-football",
+    results: data.length,
+    data,
+    diagnostic: providerDiagnostic(result)
+  };
+}
+
 export async function apiFootballSports(date, env) {
   if (!env.API_FOOTBALL_KEY) {
     return { provider: "api-football", results: 0, data: [], diagnostic: { status: null, errors: { configuration: "API_FOOTBALL_KEY ausente" } } };
