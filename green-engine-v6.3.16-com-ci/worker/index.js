@@ -43,10 +43,7 @@ async function sports(url, env) {
     return json({ error: "Data invalida. Use AAAA-MM-DD." }, 400);
   }
   if (!apiFootballConfigured(env)) {
-    return json({
-      error: "API_FOOTBALL_KEY nao esta configurada no Cloudflare.",
-      providerMode: "api-football"
-    }, 500);
+    return json({ error: "API_FOOTBALL_KEY nao esta configurada no Cloudflare.", providerMode: "api-football" }, 500);
   }
 
   const result = await apiFootballSports(date, env);
@@ -56,54 +53,25 @@ async function sports(url, env) {
     return json({
       error: "Nenhum jogo encontrado para esta data no API-Football dentro do catalogo Green Engine.",
       providerMode: "api-football",
-      sources: {
-        apiFootball: {
-          configured: true,
-          count: 0,
-          status: result?.diagnostic?.status ?? null,
-          errors: result?.diagnostic?.errors ?? null
-        }
-      }
+      sources: { apiFootball: { configured: true, count: 0, status: result?.diagnostic?.status ?? null, errors: result?.diagnostic?.errors ?? null } }
     }, 404);
   }
 
   return json({
     providerMode: "api-football",
     data,
-    sources: {
-      apiFootball: {
-        configured: true,
-        count: data.length,
-        status: result?.diagnostic?.status ?? null,
-        errors: result?.diagnostic?.errors ?? null
-      }
-    },
-    meta: {
-      total: data.length,
-      date,
-      timezone: "America/Sao_Paulo",
-      leagueFilter: "curated",
-      provider: "api-football"
-    }
+    sources: { apiFootball: { configured: true, count: data.length, status: result?.diagnostic?.status ?? null, errors: result?.diagnostic?.errors ?? null } },
+    meta: { total: data.length, date, timezone: "America/Sao_Paulo", leagueFilter: "curated", provider: "api-football" }
   }, 200);
 }
 
 async function leagues(env) {
-  if (!apiFootballConfigured(env)) {
-    return json({ error: "API_FOOTBALL_KEY nao esta configurada no Cloudflare." }, 500);
-  }
+  if (!apiFootballConfigured(env)) return json({ error: "API_FOOTBALL_KEY nao esta configurada no Cloudflare." }, 500);
   const result = await apiFootballLeagues(env);
   const data = Array.isArray(result) ? result : [];
   return json({
     providerMode: "api-football",
-    sources: {
-      apiFootball: {
-        configured: true,
-        count: data.length,
-        status: result?.diagnostic?.status ?? null,
-        errors: result?.diagnostic?.errors ?? null
-      }
-    },
+    sources: { apiFootball: { configured: true, count: data.length, status: result?.diagnostic?.status ?? null, errors: result?.diagnostic?.errors ?? null } },
     data,
     availableLeagueCount: data.length,
     catalog: { type: "curated", genders: ["male", "female", "mixed"], priorities: ["A", "B"] }
@@ -111,9 +79,7 @@ async function leagues(env) {
 }
 
 async function markets(env) {
-  if (!apiFootballConfigured(env)) {
-    return json({ error: "API_FOOTBALL_KEY nao esta configurada no Cloudflare." }, 500);
-  }
+  if (!apiFootballConfigured(env)) return json({ error: "API_FOOTBALL_KEY nao esta configurada no Cloudflare." }, 500);
 
   const result = await apiFootballBetTypes(env);
   return json({
@@ -123,12 +89,28 @@ async function markets(env) {
     source: "API-Football /odds/bets",
     diagnostic: result?.diagnostic || null,
     greenEngine: {
-      statisticalMarketFamilies: [
+      implementedStatisticalFamilies: [
         "goals",
         "both-teams-to-score",
-        "result-and-handicap",
+        "home-away-double-chance (+0.5)",
         "corners",
         "yellow-cards"
+      ],
+      candidateStatisticalFamilies: [
+        "shots",
+        "offsides",
+        "fouls",
+        "red-cards",
+        "possession",
+        "passes"
+      ],
+      eligibilityPipeline: [
+        "API-Football bet catalogue",
+        "fixture/league coverage",
+        "historical observations",
+        "market probability",
+        "Confidence Score",
+        "global ranking"
       ],
       selectionRule: "probability + Confidence Score + global ranking",
       oddsInfluence: false,
