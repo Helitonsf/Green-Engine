@@ -8,7 +8,7 @@ preview_urls = false
 directory = "./public"
 
 [secrets]
-required = ["SPORTMONKS_API_TOKEN"]
+required = ["SPORTMONKS_API_TOKEN", "API_FOOTBALL_KEY"]
 
 # ALLOWED_ORIGINS autoriza o dashboard publicado no GitHub Pages a consumir
 # a API deste Worker por navegador (CORS).
