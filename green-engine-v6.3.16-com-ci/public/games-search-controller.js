@@ -16,7 +16,7 @@
     } catch (error) {
       console.warn("[Green Engine] Redirecionamento da API falhou:", error);
     }
-    return originalFetch(input);
+    return originalFetch(input, init);
   };
 
   const dateInput = document.getElementById("gameDate");
@@ -41,6 +41,11 @@
     return [];
   }
 
+  function getParticipantByLocation(game, location) {
+    const participants = Array.isArray(game?.participants) ? game.participants : [];
+    return participants.find(p => String(p?.meta?.location || "").toLowerCase() === location) || null;
+  }
+
   function renderGames(games) {
     clearGames();
     if (!games.length) {
@@ -52,9 +57,11 @@
     games.forEach(game => {
       const fixtureId = game?.fixture_id ?? game?.fixtureId ?? game?.fixture?.id ?? game?.id;
       const provider = String(game?.provider || "sportmonks").toLowerCase();
-      const home = game?.home_team?.name ?? game?.homeTeam?.name ?? game?.home?.name ?? game?.home_name ?? game?.participants?.[0]?.name ?? "Mandante";
-      const away = game?.away_team?.name ?? game?.awayTeam?.name ?? game?.away?.name ?? game?.away_name ?? game?.participants?.[1]?.name ?? "Visitante";
-      const league = game?.league?.name || "Liga não informada";
+      const homeParticipant = getParticipantByLocation(game, "home");
+      const awayParticipant = getParticipantByLocation(game, "away");
+      const home = game?.home_team?.name ?? game?.homeTeam?.name ?? game?.home?.name ?? game?.home_name ?? homeParticipant?.name ?? game?.participants?.[0]?.name ?? "Mandante";
+      const away = game?.away_team?.name ?? game?.awayTeam?.name ?? game?.away?.name ?? game?.away_name ?? awayParticipant?.name ?? game?.participants?.[1]?.name ?? "Visitante";
+      const league = game?.league?.name ?? game?.league_name ?? game?.competition?.name ?? "Liga não informada";
 
       const item = document.createElement("button");
       item.type = "button";
