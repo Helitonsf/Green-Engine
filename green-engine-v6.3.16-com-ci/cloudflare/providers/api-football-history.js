@@ -72,6 +72,17 @@ function normalizeFixture(fixture, teamId) {
   const scoreAvailable = homeGoals != null && awayGoals != null;
   const venue = isHome ? "home" : "away";
 
+  const statistics = Array.isArray(fixture?.statistics) ? fixture.statistics : [];
+  const statisticsNormalized = classifyStatistics(statistics).map(stat => ({
+    ...stat,
+    location:
+      stat.participantId === Number(home?.id)
+        ? "home"
+        : stat.participantId === Number(away?.id)
+          ? "away"
+          : null
+  }));
+
   return {
     id: Number(fixture?.fixture?.id),
     starting_at: fixture?.fixture?.date || null,
@@ -86,8 +97,8 @@ function normalizeFixture(fixture, teamId) {
     goalsFor: scoreAvailable ? (isHome ? homeGoals : awayGoals) : null,
     goalsAgainst: scoreAvailable ? (isHome ? awayGoals : homeGoals) : null,
     score: { home: homeGoals, away: awayGoals },
-    statistics: Array.isArray(fixture?.statistics) ? fixture.statistics : [],
-    statisticsNormalized: classifyStatistics(fixture?.statistics),
+    statistics,
+    statisticsNormalized,
     scoreSource: "goals.home-away",
     scoreAvailable
   };
