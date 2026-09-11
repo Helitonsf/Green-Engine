@@ -47,21 +47,30 @@ async function sports(url, env) {
   }
 
   const result = await apiFootballSports(date, env);
-  const data = (Array.isArray(result?.data) ? result.data : []).filter(fixture => isAllowedLeague(fixture?.league || {}));
+  const data = Array.isArray(result?.data) ? result.data : [];
 
   if (!data.length) {
     return json({
-      error: "Nenhum jogo encontrado para esta data no API-Football dentro do catalogo Green Engine.",
+      error: "Nenhum jogo encontrado para esta data no API-Football.",
       providerMode: "api-football",
       sources: { apiFootball: { configured: true, count: 0, status: result?.diagnostic?.status ?? null, errors: result?.diagnostic?.errors ?? null } }
     }, 404);
   }
 
+  const curatedCount = data.filter(fixture => isAllowedLeague(fixture?.league || {})).length;
+
   return json({
     providerMode: "api-football",
     data,
     sources: { apiFootball: { configured: true, count: data.length, status: result?.diagnostic?.status ?? null, errors: result?.diagnostic?.errors ?? null } },
-    meta: { total: data.length, date, timezone: "America/Sao_Paulo", leagueFilter: "curated", provider: "api-football" }
+    meta: {
+      total: data.length,
+      date,
+      timezone: "America/Sao_Paulo",
+      leagueFilter: "metadata-only",
+      curatedCatalogMatches: curatedCount,
+      provider: "api-football"
+    }
   }, 200);
 }
 
@@ -74,7 +83,7 @@ async function leagues(env) {
     sources: { apiFootball: { configured: true, count: data.length, status: result?.diagnostic?.status ?? null, errors: result?.diagnostic?.errors ?? null } },
     data,
     availableLeagueCount: data.length,
-    catalog: { type: "curated", genders: ["male", "female", "mixed"], priorities: ["A", "B"] }
+    catalog: { type: "curated-metadata", genders: ["male", "female", "mixed"], priorities: ["A", "B"] }
   }, 200);
 }
 
@@ -128,8 +137,7 @@ async function fixture(url, env) {
   if (!id || !/^\d+$/.test(id)) return json({ error: "Informe um fixture ID numerico." }, 400);
   if (!apiFootballConfigured(env)) return json({ error: "API_FOOTBALL_KEY nao esta configurada no Cloudflare." }, 500);
   const data = await apiFootballFixture(id, env);
-  if (!data) return json({ error: "API-Football nao encontrou o fixture solicitado ou a liga nao esta no catalogo Green Engine." }, 404);
-  if (!isAllowedLeague(data?.league || {})) return json({ error: "A liga do fixture nao esta no catalogo Green Engine." }, 404);
+  if (!data) return json({ error: "API-Football nao encontrou o fixture solicitado." }, 404);
   return json({ provider: "api-football", data }, 200);
 }
 
@@ -151,7 +159,7 @@ export default {
     else if (url.pathname === "/api/markets") response = await withCache(request, ctx, CACHE_TTL.markets, () => markets(env));
     else if (url.pathname === "/api/fixture") response = await withCache(request, ctx, CACHE_TTL.fixture, () => fixture(url, env));
     else if (url.pathname === "/api/history") response = await withCache(request, ctx, CACHE_TTL.history, () => history(url, env));
-    else if (url.pathname === "/health") response = json({ ok: true, service: "green-engine-v6.3.16", timezone: "America/Sao_Paulo", leagueFilter: "curated", provider: "api-football" }, 200);
+    else if (url.pathname === "/health") response = json({ ok: true, service: "green-engine-v6.3.16", timezone: "America/Sao_Paulo", leagueFilter: "metadata-only", provider: "api-football" }, 200);
     else response = json({ error: "Rota nao encontrada." }, 404);
     return cors(request, response, env);
   }
