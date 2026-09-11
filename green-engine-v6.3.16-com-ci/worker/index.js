@@ -1,9 +1,9 @@
-import { apiFootballConfigured, apiFootballLeagues, apiFootballSports, apiFootballFixture } from "../cloudflare/providers/api-football.js";
+import { apiFootballConfigured, apiFootballLeagues, apiFootballBetTypes, apiFootballSports, apiFootballFixture } from "../cloudflare/providers/api-football.js";
 import { apiFootballHistory } from "../cloudflare/providers/api-football-history.js";
 import { isAllowedLeague } from "../cloudflare/providers/league-catalog.js";
 
 const JSON_HEADERS = { "Content-Type": "application/json; charset=utf-8" };
-const CACHE_TTL = { sports: 120, leagues: 3600, fixture: 60, history: 300 };
+const CACHE_TTL = { sports: 120, leagues: 3600, markets: 86400, fixture: 60, history: 300 };
 
 function json(body, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(body), { status, headers: { ...JSON_HEADERS, "Cache-Control": "no-store", ...extraHeaders } });
@@ -110,6 +110,37 @@ async function leagues(env) {
   }, 200);
 }
 
+async function markets(env) {
+  if (!apiFootballConfigured(env)) {
+    return json({ error: "API_FOOTBALL_KEY nao esta configurada no Cloudflare." }, 500);
+  }
+
+  const result = await apiFootballBetTypes(env);
+  return json({
+    providerMode: "api-football",
+    data: result?.data || [],
+    availableBetTypeCount: result?.results || 0,
+    source: "API-Football /odds/bets",
+    diagnostic: result?.diagnostic || null,
+    greenEngine: {
+      statisticalMarketFamilies: [
+        "goals",
+        "both-teams-to-score",
+        "result-and-handicap",
+        "corners",
+        "yellow-cards"
+      ],
+      selectionRule: "probability + Confidence Score + global ranking",
+      oddsInfluence: false,
+      recommendationThresholds: {
+        confidenceScoreMin: 70,
+        probabilityMin: 0.70,
+        scoreGapMin: 3
+      }
+    }
+  }, 200);
+}
+
 async function fixture(url, env) {
   const id = url.searchParams.get("id");
   if (!id || !/^\d+$/.test(id)) return json({ error: "Informe um fixture ID numerico." }, 400);
@@ -135,6 +166,7 @@ export default {
     let response;
     if (url.pathname === "/api/sports") response = await withCache(request, ctx, CACHE_TTL.sports, () => sports(url, env));
     else if (url.pathname === "/api/leagues") response = await withCache(request, ctx, CACHE_TTL.leagues, () => leagues(env));
+    else if (url.pathname === "/api/markets") response = await withCache(request, ctx, CACHE_TTL.markets, () => markets(env));
     else if (url.pathname === "/api/fixture") response = await withCache(request, ctx, CACHE_TTL.fixture, () => fixture(url, env));
     else if (url.pathname === "/api/history") response = await withCache(request, ctx, CACHE_TTL.history, () => history(url, env));
     else if (url.pathname === "/health") response = json({ ok: true, service: "green-engine-v6.3.16", timezone: "America/Sao_Paulo", leagueFilter: "curated", provider: "api-football" }, 200);
