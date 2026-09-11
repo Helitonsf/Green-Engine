@@ -1,4 +1,4 @@
-import { historyCore } from "../cloudflare/history-core.js";
+import { historyCore, calculateGreenScore, normalizeGreenScoreOutput } from "../cloudflare/history-core.js";
 import { apiFootballConfigured, apiFootballLeagues, apiFootballSports, apiFootballFixture } from "../cloudflare/providers/api-football.js";
 import { apiFootballHistory } from "../cloudflare/providers/api-football-history.js";
 import { enrichLeague, isAllowedLeague } from "../cloudflare/providers/league-catalog.js";
@@ -223,6 +223,43 @@ async function leagues(env) {
   }, 200);
 }
 
+function correctHistoryResults(history) {
+  if (!history || !Array.isArray(history.matches)) return history;
+
+  const corrected = {
+    ...history,
+    matches: history.matches.map(match => {
+      const goalsFor = Number(match?.goalsFor);
+      const goalsAgainst = Number(match?.goalsAgainst);
+      if (!Number.isFinite(goalsFor) || !Number.isFinite(goalsAgainst)) return match;
+      const result = goalsFor === goalsAgainst ? "D" : goalsFor > goalsAgainst ? "W" : "L";
+      return { ...match, result };
+    })
+  };
+
+  corrected.wins = corrected.matches.filter(m => m.result === "W").length;
+  corrected.draws = corrected.matches.filter(m => m.result === "D").length;
+  corrected.losses = corrected.matches.filter(m => m.result === "L").length;
+  corrected.form = corrected.matches.map(m => m.result || "").join("");
+  return corrected;
+}
+
+function rebuildHistoryScore(body) {
+  if (!body?.history?.home || !body?.history?.away) return body;
+
+  const home = correctHistoryResults(body.history.home);
+  const away = correctHistoryResults(body.history.away);
+  const homeVenueMatches = home.matches.filter(m => m?.venue === "home");
+  const awayVenueMatches = away.matches.filter(m => m?.venue === "away");
+  const greenScore = calculateGreenScore(home, away, homeVenueMatches, awayVenueMatches);
+
+  return {
+    ...body,
+    history: { home, away },
+    greenScore: normalizeGreenScoreOutput(greenScore)
+  };
+}
+
 async function fixture(url, env) {
   const id = url.searchParams.get("id");
   const provider = (url.searchParams.get("provider") || "sportmonks").toLowerCase();
@@ -268,6 +305,9 @@ async function history(url, env) {
   }
 
   const result = await historyCore(fixtureId, env.SPORTMONKS_API_TOKEN);
+  if (result.statusCode === 200) {
+    return json(rebuildHistoryScore(result.body), 200);
+  }
   return json(result.body, result.statusCode);
 }
 
