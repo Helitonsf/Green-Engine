@@ -133,7 +133,7 @@ export async function apiFootballHistory(id, env) {
     return { statusCode: 500, body: { ok: false, provider: "api-football", error: "API_FOOTBALL_KEY nao esta configurada no Cloudflare." } };
   }
 
-  const fixtureResult = await apiFetch(`/fixtures?id=${encodeURIComponent(id)}`, env.API_FOOTBALL_KEY);
+  const fixtureResult = await apiFetch(`/fixtures?ids=${encodeURIComponent(id)}`, env.API_FOOTBALL_KEY);
   const fixture = fixtureResult.data?.response?.[0];
   if (!fixtureResult.ok || !fixture) {
     return { statusCode: fixtureResult.status || 404, body: { ok: false, provider: "api-football", error: "Fixture API-Football nao encontrado." } };
