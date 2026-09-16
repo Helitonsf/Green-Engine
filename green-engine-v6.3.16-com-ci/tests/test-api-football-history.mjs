@@ -46,6 +46,10 @@ const originalFetch = globalThis.fetch;
 globalThis.fetch = async url => {
   const u = new URL(url);
 
+  // resolveFixture: id → ids → date
+  if (u.pathname === "/fixtures" && u.searchParams.get("id") === String(fixtureId)) {
+    return new Response(JSON.stringify({ response: [currentFixture] }), { status: 200 });
+  }
   if (u.pathname === "/fixtures" && u.searchParams.get("ids") === String(fixtureId)) {
     return new Response(JSON.stringify({ response: [currentFixture] }), { status: 200 });
   }
