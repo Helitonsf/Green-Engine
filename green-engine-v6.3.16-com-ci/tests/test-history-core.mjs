@@ -35,11 +35,11 @@ const score = calculateGreenScore(homeHistory, awayHistory, homeMatches, awayMat
 const normalized = normalizeGreenScoreOutput(score);
 
 assert.equal(normalized.oddsInfluence, false);
-assert.equal(normalized.markets.length, 14);
+assert.equal(normalized.markets.length, 16);
 assert.ok(normalized.markets.every(m => Number(m.probability) >= 0 && Number(m.probability) <= 1));
 assert.ok(normalized.markets.every(m => Number(m.confidenceScore) >= 0 && Number(m.confidenceScore) <= 100));
 assert.ok(normalized.markets.some(m => m.market === "Escanteios Over 8.5"));
 assert.ok(normalized.markets.some(m => m.market === "Cartões amarelos Over 3.5"));
 assert.ok(normalized.ranking.length === normalized.markets.length);
 
-console.log("\n✅ test-history-core: cálculo API-Football e ranking validados sem odds.");
+console.log("\nPASS test-history-core: Green Score v6.3.16, 16 mercados e odds=false.");
