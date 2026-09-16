@@ -56,11 +56,11 @@
     setStatus(`${games.length} jogo(s) encontrado(s).`);
     games.forEach(game => {
       const fixtureId = game?.fixture_id ?? game?.fixtureId ?? game?.fixture?.id ?? game?.id;
-      const provider = String(game?.provider || "sportmonks").toLowerCase();
+      const provider = String(game?.provider || "api-football").toLowerCase();
       const homeParticipant = getParticipantByLocation(game, "home");
       const awayParticipant = getParticipantByLocation(game, "away");
       const home = game?.home_team?.name ?? game?.homeTeam?.name ?? game?.home?.name ?? game?.home_name ?? homeParticipant?.name ?? game?.participants?.[0]?.name ?? "Mandante";
-      const away = game?.away_team?.name ?? game?.awayTeam?.name ?? game?.away?.name ?? game?.away_name ?? awayParticipant?.name ?? game?.participants?.[1]?.name ?? "Visitante";
+      const away = game?.away_team?.name ?? game?.awayTeam?.name ?? game?.away_name ?? game?.away?.name ?? awayParticipant?.name ?? game?.participants?.[1]?.name ?? "Visitante";
       const league = game?.league?.name ?? game?.league_name ?? game?.competition?.name ?? "Liga não informada";
 
       const item = document.createElement("button");
