@@ -183,8 +183,7 @@ export async function apiFootballFixture(id, env, context = {}) {
   const fixtureId = String(id).trim();
   if (!/^\d+$/.test(fixtureId)) return null;
 
-  // Resolve the selected game by its actual context first. The ID carried by
-  // the search layer may be an external/reference ID rather than API-Football.
+  // Resolve by context first (date + team names) when available.
   const date = String(context?.date || "").slice(0, 10);
   const homeName = context?.home;
   const awayName = context?.away;
@@ -198,8 +197,9 @@ export async function apiFootballFixture(id, env, context = {}) {
     if (contextualMatch) return normalizeFixture(contextualMatch);
   }
 
-  // Preserve direct native-ID resolution for callers without context and as a
-  // fallback for provider responses that cannot be found in the date window.
+  // Direct native-ID resolution. Accept the fixture when the ID matches even if
+  // context date differs due to timezone (e.g. 22h BRT becomes next day in UTC).
+  // matchesContext is only required for the date-based search above.
   const primary = await apiFetch(
     `/fixtures?id=${encodeURIComponent(fixtureId)}`,
     env.API_FOOTBALL_KEY
@@ -207,7 +207,7 @@ export async function apiFootballFixture(id, env, context = {}) {
   const primaryFixture = primary.ok && Array.isArray(primary.data?.response)
     ? primary.data.response[0]
     : null;
-  if (primaryFixture && matchesContext(primaryFixture, context)) {
+  if (primaryFixture) {
     return normalizeFixture(primaryFixture);
   }
 
@@ -218,7 +218,7 @@ export async function apiFootballFixture(id, env, context = {}) {
   const fallbackFixture = fallback.ok && Array.isArray(fallback.data?.response)
     ? fallback.data.response[0]
     : null;
-  if (fallbackFixture && matchesContext(fallbackFixture, context)) {
+  if (fallbackFixture) {
     return normalizeFixture(fallbackFixture);
   }
 
