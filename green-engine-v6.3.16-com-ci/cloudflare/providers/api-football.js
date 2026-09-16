@@ -151,12 +151,24 @@ export async function apiFootballSports(date, env) {
 
 export async function apiFootballFixture(id, env) {
   if (!env.API_FOOTBALL_KEY) return null;
-  const result = await apiFetch(
-    `/fixtures?ids=${encodeURIComponent(id)}`,
+  const fixtureId = String(id).trim();
+  if (!/^\d+$/.test(fixtureId)) return null;
+
+  const primary = await apiFetch(
+    `/fixtures?id=${encodeURIComponent(fixtureId)}`,
     env.API_FOOTBALL_KEY
   );
-  if (!result.ok || !Array.isArray(result.data?.response) || !result.data.response[0]) {
-    return null;
+  if (primary.ok && Array.isArray(primary.data?.response) && primary.data.response[0]) {
+    return normalizeFixture(primary.data.response[0]);
   }
-  return normalizeFixture(result.data.response[0]);
+
+  const fallback = await apiFetch(
+    `/fixtures?ids=${encodeURIComponent(fixtureId)}`,
+    env.API_FOOTBALL_KEY
+  );
+  if (fallback.ok && Array.isArray(fallback.data?.response) && fallback.data.response[0]) {
+    return normalizeFixture(fallback.data.response[0]);
+  }
+
+  return null;
 }
