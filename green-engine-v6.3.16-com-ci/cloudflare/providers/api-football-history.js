@@ -2,9 +2,13 @@ import { normalizeGreenScoreOutput, calculateGreenScore } from "../history-core.
 
 const API_FOOTBALL_BASE = "https://v3.football.api-sports.io";
 const FETCH_TIMEOUT_MS = 10000;
-const HISTORY_CANDIDATES = 15;
+/** last= por time — menor = menos pressão no plano free; 8 costuma bastar para 5 válidos. */
+const HISTORY_CANDIDATES = 8;
 const REQUIRED_HISTORY = 5;
-const MAX_DETAIL_FIXTURES = 20;
+/** IDs no lote fixtures?ids= (1 chamada). */
+const MAX_DETAIL_FIXTURES = 10;
+/** Máx. de /fixtures/statistics extras (as que mais estouram rate-limit). */
+const MAX_STATS_FETCHES = 6;
 
 async function apiFetch(path, apiKey) {
   const controller = new AbortController();
@@ -154,16 +158,38 @@ function hasApiErrors(result) {
   return Boolean(errors);
 }
 
+/** Detecta rate-limit da API-Football (plano free estoura com facilidade). */
+function isRateLimited(result) {
+  if (!result) return false;
+  if (result.status === 429) return true;
+  const errors = result?.data?.errors;
+  if (!errors) return false;
+  const text = typeof errors === "string" ? errors : JSON.stringify(errors);
+  return /rate\s*limit|too many requests|exceeded the limit/i.test(text);
+}
+
+/**
+ * Resolve o fixture de forma robusta:
+ * 1) /fixtures?id= (preferido)
+ * 2) /fixtures?ids=
+ * 3) busca por data + nomes (quando context informado) — mesmo fallback do /api/fixture
+ *
+ * Isso evita "Fixture nao encontrado" quando o plano free/rate-limit
+ * devolve response vazio em /fixtures?id= mas o jogo existe via data.
+ */
 async function resolveFixture(id, env, context = {}) {
   const attempts = [];
 
   const byId = await apiFetch(`/fixtures?id=${encodeURIComponent(id)}`, env.API_FOOTBALL_KEY);
   attempts.push({ path: `/fixtures?id=${id}`, status: byId.status, errors: byId.data?.errors ?? null, count: Array.isArray(byId.data?.response) ? byId.data.response.length : 0 });
+  // Rate-limit: não gastar mais chamadas de fallback.
+  if (isRateLimited(byId)) return { fixture: null, attempts, lastResult: byId };
   let fixture = extractFixtureFromResult(byId);
   if (fixture) return { fixture, attempts };
 
   const byIds = await apiFetch(`/fixtures?ids=${encodeURIComponent(id)}`, env.API_FOOTBALL_KEY);
   attempts.push({ path: `/fixtures?ids=${id}`, status: byIds.status, errors: byIds.data?.errors ?? null, count: Array.isArray(byIds.data?.response) ? byIds.data.response.length : 0 });
+  if (isRateLimited(byIds)) return { fixture: null, attempts, lastResult: byIds };
   fixture = extractFixtureFromResult(byIds);
   if (fixture) return { fixture, attempts };
 
@@ -177,6 +203,7 @@ async function resolveFixture(id, env, context = {}) {
     );
     const candidates = Array.isArray(byDate.data?.response) ? byDate.data.response : [];
     attempts.push({ path: `/fixtures?date=${date}`, status: byDate.status, errors: byDate.data?.errors ?? null, count: candidates.length });
+    if (isRateLimited(byDate)) return { fixture: null, attempts, lastResult: byDate };
 
     const normalize = value =>
       String(value || "")
@@ -215,7 +242,9 @@ export async function apiFootballHistory(id, env, context = {}) {
   const { fixture, attempts, lastResult } = await resolveFixture(id, env, context);
 
   if (!fixture) {
-    const rateLimited = (attempts || []).some(a => hasApiErrors({ data: { errors: a.errors } }) || /rate|limit|too many/i.test(JSON.stringify(a.errors || "")));
+    const rateLimited = (attempts || []).some(a =>
+      isRateLimited({ status: a.status, data: { errors: a.errors } })
+    );
     return {
       statusCode: rateLimited ? 429 : (lastResult?.status || 404),
       body: {
@@ -225,6 +254,7 @@ export async function apiFootballHistory(id, env, context = {}) {
           ? "Limite de requisicoes da API-Football atingido. Tente novamente em alguns segundos."
           : "Fixture API-Football nao encontrado.",
         diagnostic: {
+          stage: "resolve-fixture",
           requestedId: String(id),
           context: {
             date: context?.date || null,
@@ -249,6 +279,28 @@ export async function apiFootballHistory(id, env, context = {}) {
     apiFetch(`/fixtures?team=${awayId}&last=${HISTORY_CANDIDATES}&timezone=America/Sao_Paulo`, env.API_FOOTBALL_KEY)
   ]);
 
+  // Rate-limit no last= é comum no plano free; não mascarar como "histórico indisponível".
+  if (isRateLimited(homeCandidates) || isRateLimited(awayCandidates)) {
+    return {
+      statusCode: 429,
+      body: {
+        ok: false,
+        provider: "api-football",
+        error: "Limite de requisicoes da API-Football atingido. Tente novamente em alguns segundos.",
+        diagnostic: {
+          stage: "team-last",
+          homeStatus: homeCandidates?.status ?? null,
+          awayStatus: awayCandidates?.status ?? null,
+          homeErrors: homeCandidates?.data?.errors ?? null,
+          awayErrors: awayCandidates?.data?.errors ?? null,
+          homeCount: Array.isArray(homeCandidates.data?.response) ? homeCandidates.data.response.length : 0,
+          awayCount: Array.isArray(awayCandidates.data?.response) ? awayCandidates.data.response.length : 0,
+          requiredPerTeam: REQUIRED_HISTORY
+        }
+      }
+    };
+  }
+
   const candidates = [
     ...(Array.isArray(homeCandidates.data?.response) ? homeCandidates.data.response : []),
     ...(Array.isArray(awayCandidates.data?.response) ? awayCandidates.data.response : [])
@@ -256,36 +308,90 @@ export async function apiFootballHistory(id, env, context = {}) {
 
   const ids = [...new Set(candidates.map(item => Number(item?.fixture?.id)).filter(Boolean))].slice(0, MAX_DETAIL_FIXTURES);
   if (!ids.length) {
-    return { statusCode: 422, body: { ok: false, provider: "api-football", error: "Historico API-Football indisponivel antes do fixture.", diagnostic: { homeHistoryCount: 0, awayHistoryCount: 0, requiredPerTeam: REQUIRED_HISTORY } } };
+    return {
+      statusCode: 422,
+      body: {
+        ok: false,
+        provider: "api-football",
+        error: "Historico API-Football indisponivel antes do fixture.",
+        diagnostic: {
+          stage: "pre-fixture-filter",
+          homeHistoryCount: 0,
+          awayHistoryCount: 0,
+          requiredPerTeam: REQUIRED_HISTORY,
+          homeLastCount: Array.isArray(homeCandidates.data?.response) ? homeCandidates.data.response.length : 0,
+          awayLastCount: Array.isArray(awayCandidates.data?.response) ? awayCandidates.data.response.length : 0,
+          homeStatus: homeCandidates?.status ?? null,
+          awayStatus: awayCandidates?.status ?? null,
+          homeErrors: homeCandidates?.data?.errors ?? null,
+          awayErrors: awayCandidates?.data?.errors ?? null
+        }
+      }
+    };
   }
 
+  // Detalhes em lote (ids=) para estatísticas; candidatos já trazem gols.
   const details = await apiFetch(`/fixtures?ids=${ids.join("-")}`, env.API_FOOTBALL_KEY);
+  if (isRateLimited(details)) {
+    return {
+      statusCode: 429,
+      body: {
+        ok: false,
+        provider: "api-football",
+        error: "Limite de requisicoes da API-Football atingido. Tente novamente em alguns segundos.",
+        diagnostic: {
+          stage: "fixtures-ids-batch",
+          status: details?.status ?? null,
+          errors: details?.data?.errors ?? null,
+          requestedIds: ids.length
+        }
+      }
+    };
+  }
   const detailedFixtures = Array.isArray(details.data?.response) ? details.data.response : [];
   const byId = new Map(detailedFixtures.map(item => [Number(item?.fixture?.id), item]));
 
+  // Fallback: se o lote não retornar um fixture, reutilizar o candidato (gols ok; stats vazias).
   function resolveFixtureRow(item) {
     const fid = Number(item?.fixture?.id);
     return byId.get(fid) || item || null;
   }
 
-  async function attachStatistics(rows) {
-    const enriched = [];
-    for (const row of rows) {
-      if (!row) continue;
-      if (Array.isArray(row.statistics) && row.statistics.length) {
-        enriched.push(row);
-        continue;
+  /**
+   * Stats são best-effort: no plano free cada /fixtures/statistics conta 1 request.
+   * - só busca o que ainda não veio no lote
+   * - hard-cap MAX_STATS_FETCHES no total (home+away)
+   * - para no primeiro rate-limit e segue com o que já tem (gols continuam válidos)
+   */
+  async function attachStatistics(homeList, awayList) {
+    const homeOut = [...homeList];
+    const awayOut = [...awayList];
+    let remaining = MAX_STATS_FETCHES;
+    let hitRateLimit = false;
+
+    async function fill(list) {
+      for (let i = 0; i < list.length; i++) {
+        if (remaining <= 0 || hitRateLimit) break;
+        const row = list[i];
+        if (!row) continue;
+        if (Array.isArray(row.statistics) && row.statistics.length) continue;
+        const fid = Number(row?.fixture?.id);
+        if (!fid) continue;
+        remaining -= 1;
+        const statsResult = await apiFetch(`/fixtures/statistics?fixture=${fid}`, env.API_FOOTBALL_KEY);
+        if (isRateLimited(statsResult)) {
+          hitRateLimit = true;
+          break;
+        }
+        const stats = Array.isArray(statsResult.data?.response) ? statsResult.data.response : [];
+        if (stats.length) list[i] = { ...row, statistics: stats };
       }
-      const fid = Number(row?.fixture?.id);
-      if (!fid) {
-        enriched.push(row);
-        continue;
-      }
-      const statsResult = await apiFetch(`/fixtures/statistics?fixture=${fid}`, env.API_FOOTBALL_KEY);
-      const stats = Array.isArray(statsResult.data?.response) ? statsResult.data.response : [];
-      enriched.push(stats.length ? { ...row, statistics: stats } : row);
     }
-    return enriched;
+
+    // Home primeiro (mais recente), depois away — prioriza amostra principal.
+    await fill(homeOut);
+    await fill(awayOut);
+    return { home: homeOut, away: awayOut, statsFetchesUsed: MAX_STATS_FETCHES - remaining, statsRateLimited: hitRateLimit };
   }
 
   let homeRows = candidates
@@ -302,10 +408,9 @@ export async function apiFootballHistory(id, env, context = {}) {
     .sort((a, b) => new Date(b?.fixture?.date || 0) - new Date(a?.fixture?.date || 0))
     .slice(0, REQUIRED_HISTORY);
 
-  [homeRows, awayRows] = await Promise.all([
-    attachStatistics(homeRows),
-    attachStatistics(awayRows)
-  ]);
+  const statsAttach = await attachStatistics(homeRows, awayRows);
+  homeRows = statsAttach.home;
+  awayRows = statsAttach.away;
 
   const homeMatches = homeRows
     .map(item => normalizeFixture(item, homeId))
@@ -373,7 +478,10 @@ export async function apiFootballHistory(id, env, context = {}) {
         awayVenueCount: awayVenueMatches.length,
         homeVenueCorrect: homeVenueMatches.every(match => match.venue === "home"),
         awayVenueCorrect: awayVenueMatches.every(match => match.venue === "away"),
-        allHistoryBeforeFixture: [...homeMatches, ...awayMatches].every(match => new Date(match.starting_at).getTime() < new Date(fixture.fixture.date).getTime())
+        allHistoryBeforeFixture: [...homeMatches, ...awayMatches].every(match => new Date(match.starting_at).getTime() < new Date(fixture.fixture.date).getTime()),
+        statsFetchesUsed: statsAttach.statsFetchesUsed,
+        statsRateLimited: statsAttach.statsRateLimited,
+        maxStatsFetches: MAX_STATS_FETCHES
       }
     }
   };
