@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node tests/test-history-core.mjs && node tests/test-api-football-history.mjs"
+    "test": "node tests/test-history-core.mjs && node tests/test-history-mock.mjs && node tests/test-history-insufficient-history.mjs && node tests/test-history-pagination.mjs && node tests/test-history-window-fallback.mjs && node tests/test-api-football-history.mjs"
   },
   "devDependencies": {
     "wrangler": "^4.122.0"

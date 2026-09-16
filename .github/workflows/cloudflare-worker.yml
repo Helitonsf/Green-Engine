@@ -7,6 +7,9 @@ on:
       - 'green-engine-v6.3.16-com-ci/cloudflare/**'
       - 'green-engine-v6.3.16-com-ci/worker/**'
       - 'green-engine-v6.3.16-com-ci/wrangler.toml'
+      - 'green-engine-v6.3.16-com-ci/package.json'
+      - 'green-engine-v6.3.16-com-ci/package-lock.json'
+      - 'green-engine-v6.3.16-com-ci/tests/**'
       - '.github/workflows/cloudflare-worker.yml'
   workflow_dispatch:
 
@@ -18,7 +21,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy:
+  test:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -31,6 +34,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: green-engine-v6.3.16-com-ci/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Validate Worker syntax
         run: >-
@@ -40,6 +48,19 @@ jobs:
           node --check cloudflare/providers/league-catalog.js &&
           node --check worker/index.js
 
+      - name: Run tests
+        run: npm test
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: green-engine-v6.3.16-com-ci
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
       - name: Deploy Worker to Cloudflare
         uses: cloudflare/wrangler-action@v3
         with:
@@ -48,4 +69,4 @@ jobs:
           workingDirectory: green-engine-v6.3.16-com-ci
           command: deploy
 
-# Production deploy intentionally follows the main branch changes above.
+# Production deploy only runs after tests pass on main.

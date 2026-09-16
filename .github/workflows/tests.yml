@@ -6,6 +6,11 @@ on:
     paths:
       - 'green-engine-v6.3.16-com-ci/**'
       - '.github/workflows/tests.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'green-engine-v6.3.16-com-ci/**'
+      - '.github/workflows/tests.yml'
   workflow_dispatch:
 
 permissions:
@@ -20,11 +25,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: green-engine-v6.3.16-com-ci/package-lock.json
+
       - name: Install dependencies
         run: npm ci
+
       - name: Run tests
         run: npm test
