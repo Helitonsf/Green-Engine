@@ -20,6 +20,18 @@ function sameTeamName(a, b) {
   return left === right || left.includes(right) || right.includes(left);
 }
 
+function matchesContext(fixture, context = {}) {
+  const date = String(context?.date || "").slice(0, 10);
+  const homeName = context?.home;
+  const awayName = context?.away;
+  if (!date || !homeName || !awayName) return true;
+
+  const fixtureDate = String(fixture?.fixture?.date || "").slice(0, 10);
+  return fixtureDate === date
+    && sameTeamName(fixture?.teams?.home?.name, homeName)
+    && sameTeamName(fixture?.teams?.away?.name, awayName);
+}
+
 function normalizeFixture(fixture) {
   const teams = fixture?.teams || {};
   const league = fixture?.league || {};
@@ -175,16 +187,22 @@ export async function apiFootballFixture(id, env, context = {}) {
     `/fixtures?id=${encodeURIComponent(fixtureId)}`,
     env.API_FOOTBALL_KEY
   );
-  if (primary.ok && Array.isArray(primary.data?.response) && primary.data.response[0]) {
-    return normalizeFixture(primary.data.response[0]);
+  const primaryFixture = primary.ok && Array.isArray(primary.data?.response)
+    ? primary.data.response[0]
+    : null;
+  if (primaryFixture && matchesContext(primaryFixture, context)) {
+    return normalizeFixture(primaryFixture);
   }
 
   const fallback = await apiFetch(
     `/fixtures?ids=${encodeURIComponent(fixtureId)}`,
     env.API_FOOTBALL_KEY
   );
-  if (fallback.ok && Array.isArray(fallback.data?.response) && fallback.data.response[0]) {
-    return normalizeFixture(fallback.data.response[0]);
+  const fallbackFixture = fallback.ok && Array.isArray(fallback.data?.response)
+    ? fallback.data.response[0]
+    : null;
+  if (fallbackFixture && matchesContext(fallbackFixture, context)) {
+    return normalizeFixture(fallbackFixture);
   }
 
   // The search layer can carry an external/reference ID that is not the
@@ -202,8 +220,7 @@ export async function apiFootballFixture(id, env, context = {}) {
   const candidates = Array.isArray(byDate.data?.response) ? byDate.data.response : [];
   const match = candidates.find(item => {
     if (!isAllowedLeague(item?.league || {})) return false;
-    return sameTeamName(item?.teams?.home?.name, homeName)
-      && sameTeamName(item?.teams?.away?.name, awayName);
+    return matchesContext(item, context);
   });
 
   return match ? normalizeFixture(match) : null;
