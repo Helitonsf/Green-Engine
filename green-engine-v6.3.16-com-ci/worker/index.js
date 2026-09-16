@@ -127,8 +127,19 @@ async function fixture(url, env) {
   const id = url.searchParams.get("id");
   if (!id || !/^\d+$/.test(id)) return json({ error: "Informe um fixture ID numerico." }, 400);
   if (!apiFootballConfigured(env)) return json({ error: "API_FOOTBALL_KEY nao esta configurada no Cloudflare." }, 500);
-  const data = await apiFootballFixture(id, env);
-  if (!data) return json({ error: "API-Football nao encontrou o fixture solicitado ou a liga nao esta no catalogo Green Engine." }, 404);
+
+  const context = {
+    date: url.searchParams.get("date") || "",
+    home: url.searchParams.get("home") || "",
+    away: url.searchParams.get("away") || ""
+  };
+  const data = await apiFootballFixture(id, env, context);
+  if (!data) {
+    return json({
+      error: "API-Football nao encontrou o fixture solicitado nem conseguiu resolver a referencia pelo contexto da partida.",
+      diagnostic: { requestedId: id, context }
+    }, 404);
+  }
   if (!isAllowedLeague(data?.league || {})) return json({ error: "A liga do fixture nao esta no catalogo Green Engine." }, 404);
   return json({ provider: "api-football", data }, 200);
 }
