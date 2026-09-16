@@ -28,9 +28,7 @@
         const requestedId = parsed.searchParams.get("fixture");
         const context = getContextForId(requestedId);
         if (context) {
-          if (context.resolvedId) {
-            parsed.searchParams.set("fixture", context.resolvedId);
-          }
+          if (context.resolvedId) parsed.searchParams.set("fixture", context.resolvedId);
           if (context.date) parsed.searchParams.set("date", context.date);
           if (context.home) parsed.searchParams.set("home", context.home);
           if (context.away) parsed.searchParams.set("away", context.away);
@@ -108,7 +106,7 @@
     setStatus(`${games.length} jogo(s) encontrado(s).`);
     games.forEach(game => {
       const fixtureId = game?.fixture_id ?? game?.fixtureId ?? game?.fixture?.id ?? game?.id;
-      const provider = String(game?.provider || "sportmonks").toLowerCase();
+      const provider = String(game?.provider || "api-football").toLowerCase();
       const homeParticipant = getParticipantByLocation(game, "home");
       const awayParticipant = getParticipantByLocation(game, "away");
       const home = game?.home_team?.name ?? game?.homeTeam?.name ?? game?.home?.name ?? game?.home_name ?? homeParticipant?.name ?? game?.participants?.[0]?.name ?? "Mandante";
