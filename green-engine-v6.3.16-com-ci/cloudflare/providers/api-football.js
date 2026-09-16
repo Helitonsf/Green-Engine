@@ -3,6 +3,23 @@ import { enrichLeague, isAllowedLeague } from "./league-catalog.js";
 const API_FOOTBALL_BASE = "https://v3.football.api-sports.io";
 const FETCH_TIMEOUT_MS = 10000;
 
+function normalizeTeamName(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\b(fc|cf|afc|club|football|futbol|f\.?c\.?)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function sameTeamName(a, b) {
+  const left = normalizeTeamName(a);
+  const right = normalizeTeamName(b);
+  if (!left || !right) return false;
+  return left === right || left.includes(right) || right.includes(left);
+}
+
 function normalizeFixture(fixture) {
   const teams = fixture?.teams || {};
   const league = fixture?.league || {};
@@ -149,7 +166,7 @@ export async function apiFootballSports(date, env) {
   };
 }
 
-export async function apiFootballFixture(id, env) {
+export async function apiFootballFixture(id, env, context = {}) {
   if (!env.API_FOOTBALL_KEY) return null;
   const fixtureId = String(id).trim();
   if (!/^\d+$/.test(fixtureId)) return null;
@@ -170,5 +187,24 @@ export async function apiFootballFixture(id, env) {
     return normalizeFixture(fallback.data.response[0]);
   }
 
-  return null;
+  // The search layer can carry an external/reference ID that is not the
+  // native API-Football fixture ID. Resolve that reference by the actual
+  // fixture context before rejecting the selection.
+  const date = String(context?.date || "").slice(0, 10);
+  const homeName = context?.home;
+  const awayName = context?.away;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !homeName || !awayName) return null;
+
+  const byDate = await apiFetch(
+    `/fixtures?date=${encodeURIComponent(date)}&timezone=America/Sao_Paulo`,
+    env.API_FOOTBALL_KEY
+  );
+  const candidates = Array.isArray(byDate.data?.response) ? byDate.data.response : [];
+  const match = candidates.find(item => {
+    if (!isAllowedLeague(item?.league || {})) return false;
+    return sameTeamName(item?.teams?.home?.name, homeName)
+      && sameTeamName(item?.teams?.away?.name, awayName);
+  });
+
+  return match ? normalizeFixture(match) : null;
 }
