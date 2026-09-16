@@ -27,7 +27,14 @@
       if (parsed.pathname === "/api/history") {
         const requestedId = parsed.searchParams.get("fixture");
         const context = getContextForId(requestedId);
-        if (context?.resolvedId) parsed.searchParams.set("fixture", context.resolvedId);
+        if (context) {
+          if (context.resolvedId) {
+            parsed.searchParams.set("fixture", context.resolvedId);
+          }
+          if (context.date) parsed.searchParams.set("date", context.date);
+          if (context.home) parsed.searchParams.set("home", context.home);
+          if (context.away) parsed.searchParams.set("away", context.away);
+        }
       }
 
       return parsed.toString();
