@@ -22,16 +22,40 @@ function cors(request, response, env) {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
+/**
+ * Cache edge com chave canônica para /api/history (só fixtureId) e
+ * TTL curto para 429 (reduz stampede no plano free da API-Football).
+ */
+function buildCacheKey(request) {
+  const url = new URL(request.url);
+  if (url.pathname === "/api/history") {
+    const fixtureId = url.searchParams.get("fixture");
+    if (fixtureId && /^\d+$/.test(fixtureId)) {
+      // Mesma partida = mesma chave, independente de home/away/date na query.
+      const canonical = new URL(url.origin + url.pathname);
+      canonical.searchParams.set("fixture", fixtureId);
+      return new Request(canonical.toString(), { method: "GET" });
+    }
+  }
+  return new Request(request.url, request);
+}
+
 async function withCache(request, ctx, ttlSeconds, computeFn) {
   if (request.method !== "GET" || !ttlSeconds) return computeFn();
   const cache = caches.default;
-  const cacheKey = new Request(request.url, request);
+  const cacheKey = buildCacheKey(request);
   const cached = await cache.match(cacheKey);
   if (cached) return cached;
   let response = await computeFn();
   if (response.status === 200) {
     response = new Response(response.body, response);
     response.headers.set("Cache-Control", `public, max-age=${ttlSeconds}`);
+    ctx.waitUntil(cache.put(cacheKey, response.clone()));
+  } else if (response.status === 429) {
+    // Evita N usuários no mesmo jogo frio martelarem a API free em paralelo.
+    const shortTtl = 15;
+    response = new Response(response.body, response);
+    response.headers.set("Cache-Control", `public, max-age=${shortTtl}`);
     ctx.waitUntil(cache.put(cacheKey, response.clone()));
   }
   return response;
@@ -155,27 +179,16 @@ async function history(url, env) {
     away: url.searchParams.get("away") || ""
   };
 
-  // Resolve ID via /api/fixture quando houver contexto (evita ID externo/desatualizado).
-  // Em seguida passa o contexto também para o history, que usa o mesmo fallback
-  // por data+nomes se /fixtures?id= falhar (comum em rate-limit do plano free).
-  let resolvedId = fixtureId;
-  if (context.date && context.home && context.away) {
-    try {
-      const resolvedFixture = await apiFootballFixture(fixtureId, env, context);
-      if (resolvedFixture?.id != null) resolvedId = String(resolvedFixture.id);
-    } catch (_) {
-      // Mantém o ID original; o history ainda tenta resolver com context.
-    }
-  }
-
-  const result = await apiFootballHistory(resolvedId, env, context);
+  // A+B: sem pré-resolve aqui. apiFootballHistory.resolveFixture já faz
+  // id → ids → date (mesma ordem do /api/fixture). Evita 2–6 requests
+  // duplicados só para achar o mesmo jogo no plano free.
+  const result = await apiFootballHistory(fixtureId, env, context);
   if (result.statusCode >= 400) {
     result.body = {
       ...result.body,
       diagnostic: {
         ...(result.body?.diagnostic || {}),
         requestedFixture: fixtureId,
-        resolvedFixture: resolvedId,
         context
       }
     };
