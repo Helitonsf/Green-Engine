@@ -183,23 +183,12 @@ export async function apiFootballFixture(id, env, context = {}) {
   const fixtureId = String(id).trim();
   if (!/^\d+$/.test(fixtureId)) return null;
 
-  // Resolve by context first (date + team names) when available.
-  const date = String(context?.date || "").slice(0, 10);
-  const homeName = context?.home;
-  const awayName = context?.away;
-  if (/^\d{4}-\d{2}-\d{2}$/.test(date) && homeName && awayName) {
-    const byDate = await apiFetch(
-      `/fixtures?date=${encodeURIComponent(date)}&timezone=America/Sao_Paulo`,
-      env.API_FOOTBALL_KEY
-    );
-    const candidates = Array.isArray(byDate.data?.response) ? byDate.data.response : [];
-    const contextualMatch = candidates.find(item => matchesContext(item, context));
-    if (contextualMatch) return normalizeFixture(contextualMatch);
-  }
+  // Ordem unificada com history.resolveFixture: id → ids → date.
+  // Frontend pós-fix manda ID nativo da API-Football; date= é a chamada
+  // mais pesada (lista o dia inteiro) e só deve ser fallback.
+  // Aceita o fixture por ID mesmo se a data do contexto divergir por fuso
+  // (ex.: jogo 22h BRT vira dia seguinte em UTC).
 
-  // Direct native-ID resolution. Accept the fixture when the ID matches even if
-  // context date differs due to timezone (e.g. 22h BRT becomes next day in UTC).
-  // matchesContext is only required for the date-based search above.
   const primary = await apiFetch(
     `/fixtures?id=${encodeURIComponent(fixtureId)}`,
     env.API_FOOTBALL_KEY
@@ -220,6 +209,19 @@ export async function apiFootballFixture(id, env, context = {}) {
     : null;
   if (fallbackFixture) {
     return normalizeFixture(fallbackFixture);
+  }
+
+  const date = String(context?.date || "").slice(0, 10);
+  const homeName = context?.home;
+  const awayName = context?.away;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date) && homeName && awayName) {
+    const byDate = await apiFetch(
+      `/fixtures?date=${encodeURIComponent(date)}&timezone=America/Sao_Paulo`,
+      env.API_FOOTBALL_KEY
+    );
+    const candidates = Array.isArray(byDate.data?.response) ? byDate.data.response : [];
+    const contextualMatch = candidates.find(item => matchesContext(item, context));
+    if (contextualMatch) return normalizeFixture(contextualMatch);
   }
 
   return null;
