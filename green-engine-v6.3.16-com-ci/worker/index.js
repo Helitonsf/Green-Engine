@@ -148,7 +148,31 @@ async function history(url, env) {
   const fixtureId = url.searchParams.get("fixture");
   if (!fixtureId || !/^\d+$/.test(fixtureId)) return json({ error: "Informe um fixture ID numerico." }, 400);
   if (!apiFootballConfigured(env)) return json({ error: "API_FOOTBALL_KEY nao esta configurada no Cloudflare." }, 500);
-  const result = await apiFootballHistory(fixtureId, env);
+
+  const context = {
+    date: url.searchParams.get("date") || "",
+    home: url.searchParams.get("home") || "",
+    away: url.searchParams.get("away") || ""
+  };
+
+  let resolvedId = fixtureId;
+  if (context.date && context.home && context.away) {
+    const resolvedFixture = await apiFootballFixture(fixtureId, env, context);
+    if (resolvedFixture?.id != null) resolvedId = String(resolvedFixture.id);
+  }
+
+  const result = await apiFootballHistory(resolvedId, env);
+  if (result.statusCode >= 400) {
+    result.body = {
+      ...result.body,
+      diagnostic: {
+        ...(result.body?.diagnostic || {}),
+        requestedFixture: fixtureId,
+        resolvedFixture: resolvedId,
+        context
+      }
+    };
+  }
   return json(result.body, result.statusCode);
 }
 
