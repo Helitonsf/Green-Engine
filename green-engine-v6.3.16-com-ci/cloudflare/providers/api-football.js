@@ -183,6 +183,23 @@ export async function apiFootballFixture(id, env, context = {}) {
   const fixtureId = String(id).trim();
   if (!/^\d+$/.test(fixtureId)) return null;
 
+  // Resolve the selected game by its actual context first. The ID carried by
+  // the search layer may be an external/reference ID rather than API-Football.
+  const date = String(context?.date || "").slice(0, 10);
+  const homeName = context?.home;
+  const awayName = context?.away;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date) && homeName && awayName) {
+    const byDate = await apiFetch(
+      `/fixtures?date=${encodeURIComponent(date)}&timezone=America/Sao_Paulo`,
+      env.API_FOOTBALL_KEY
+    );
+    const candidates = Array.isArray(byDate.data?.response) ? byDate.data.response : [];
+    const contextualMatch = candidates.find(item => matchesContext(item, context));
+    if (contextualMatch) return normalizeFixture(contextualMatch);
+  }
+
+  // Preserve direct native-ID resolution for callers without context and as a
+  // fallback for provider responses that cannot be found in the date window.
   const primary = await apiFetch(
     `/fixtures?id=${encodeURIComponent(fixtureId)}`,
     env.API_FOOTBALL_KEY
@@ -205,23 +222,5 @@ export async function apiFootballFixture(id, env, context = {}) {
     return normalizeFixture(fallbackFixture);
   }
 
-  // The search layer can carry an external/reference ID that is not the
-  // native API-Football fixture ID. Resolve that reference by the actual
-  // fixture context before rejecting the selection.
-  const date = String(context?.date || "").slice(0, 10);
-  const homeName = context?.home;
-  const awayName = context?.away;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !homeName || !awayName) return null;
-
-  const byDate = await apiFetch(
-    `/fixtures?date=${encodeURIComponent(date)}&timezone=America/Sao_Paulo`,
-    env.API_FOOTBALL_KEY
-  );
-  const candidates = Array.isArray(byDate.data?.response) ? byDate.data.response : [];
-  const match = candidates.find(item => {
-    if (!isAllowedLeague(item?.league || {})) return false;
-    return matchesContext(item, context);
-  });
-
-  return match ? normalizeFixture(match) : null;
+  return null;
 }
