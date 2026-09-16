@@ -155,13 +155,20 @@ async function history(url, env) {
     away: url.searchParams.get("away") || ""
   };
 
+  // Resolve ID via /api/fixture quando houver contexto (evita ID externo/desatualizado).
+  // Em seguida passa o contexto também para o history, que usa o mesmo fallback
+  // por data+nomes se /fixtures?id= falhar (comum em rate-limit do plano free).
   let resolvedId = fixtureId;
   if (context.date && context.home && context.away) {
-    const resolvedFixture = await apiFootballFixture(fixtureId, env, context);
-    if (resolvedFixture?.id != null) resolvedId = String(resolvedFixture.id);
+    try {
+      const resolvedFixture = await apiFootballFixture(fixtureId, env, context);
+      if (resolvedFixture?.id != null) resolvedId = String(resolvedFixture.id);
+    } catch (_) {
+      // Mantém o ID original; o history ainda tenta resolver com context.
+    }
   }
 
-  const result = await apiFootballHistory(resolvedId, env);
+  const result = await apiFootballHistory(resolvedId, env, context);
   if (result.statusCode >= 400) {
     result.body = {
       ...result.body,
