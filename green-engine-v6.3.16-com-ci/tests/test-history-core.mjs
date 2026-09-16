@@ -42,4 +42,4 @@ assert.ok(normalized.markets.some(m => m.market === "Escanteios Over 8.5"));
 assert.ok(normalized.markets.some(m => m.market === "Cartões amarelos Over 3.5"));
 assert.ok(normalized.ranking.length === normalized.markets.length);
 
-console.log("\nPASS test-history-core: Green Score v6.3.16, 16 mercados e odds=false.");
+console.log("\n✅ test-history-core: cálculo API-Football e ranking validados sem odds.");
