@@ -42,7 +42,21 @@
       const rawUrl = typeof input === "string" ? input : input?.url || "";
       if (rawUrl.startsWith("/api/")) {
         const target = withFixtureContext(API_BASE + rawUrl);
-        return originalFetch(target, init);
+        const parsedTarget = new URL(target);
+
+        return originalFetch(target, init).then(response => {
+          if (parsedTarget.pathname === "/api/fixture" && response.ok) {
+            response.clone().json().then(payload => {
+              const requestedId = parsedTarget.searchParams.get("id");
+              const resolvedId = payload?.data?.id ?? payload?.data?.fixture_id ?? null;
+              if (requestedId && resolvedId != null) {
+                const context = getContextForId(requestedId);
+                if (context) context.resolvedId = String(resolvedId);
+              }
+            }).catch(() => {});
+          }
+          return response;
+        });
       }
     } catch (error) {
       console.warn("[Green Engine] Redirecionamento da API falhou:", error);
