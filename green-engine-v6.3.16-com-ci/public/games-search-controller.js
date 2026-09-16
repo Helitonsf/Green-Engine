@@ -3,15 +3,46 @@
 
   const API_BASE = "https://green-engine-v6-3-15-cf.gerenteheliton.workers.dev";
   const originalFetch = window.fetch.bind(window);
+  const fixtureContexts = window.greenEngineFixtureContexts = window.greenEngineFixtureContexts || {};
+
+  function getContextForId(id) {
+    return fixtureContexts[String(id)] || null;
+  }
+
+  function withFixtureContext(url) {
+    try {
+      const parsed = new URL(url, window.location.href);
+      if (!parsed.pathname.startsWith("/api/")) return url;
+
+      if (parsed.pathname === "/api/fixture") {
+        const id = parsed.searchParams.get("id");
+        const context = getContextForId(id);
+        if (context) {
+          if (context.date) parsed.searchParams.set("date", context.date);
+          if (context.home) parsed.searchParams.set("home", context.home);
+          if (context.away) parsed.searchParams.set("away", context.away);
+        }
+      }
+
+      if (parsed.pathname === "/api/history") {
+        const requestedId = parsed.searchParams.get("fixture");
+        const context = getContextForId(requestedId);
+        if (context?.resolvedId) parsed.searchParams.set("fixture", context.resolvedId);
+      }
+
+      return parsed.toString();
+    } catch (error) {
+      console.warn("[Green Engine] Contexto de fixture nao aplicado:", error);
+      return url;
+    }
+  }
 
   window.fetch = function (input, init) {
     try {
-      const url = typeof input === "string" ? input : input?.url || "";
-      if (url.startsWith("/api/")) {
-        const target = API_BASE + url;
-        return typeof input === "string"
-          ? originalFetch(target, init)
-          : originalFetch(new Request(target, input), init);
+      const rawUrl = typeof input === "string" ? input : input?.url || "";
+      if (rawUrl.startsWith("/api/")) {
+        const target = withFixtureContext(API_BASE + rawUrl);
+        return originalFetch(target, init);
       }
     } catch (error) {
       console.warn("[Green Engine] Redirecionamento da API falhou:", error);
@@ -60,8 +91,9 @@
       const homeParticipant = getParticipantByLocation(game, "home");
       const awayParticipant = getParticipantByLocation(game, "away");
       const home = game?.home_team?.name ?? game?.homeTeam?.name ?? game?.home?.name ?? game?.home_name ?? homeParticipant?.name ?? game?.participants?.[0]?.name ?? "Mandante";
-      const away = game?.away_team?.name ?? game?.awayTeam?.name ?? game?.away?.name ?? game?.away_name ?? awayParticipant?.name ?? game?.participants?.[1]?.name ?? "Visitante";
+      const away = game?.away_team?.name ?? game?.awayTeam?.name ?? game?.away_name ?? game?.away?.name ?? awayParticipant?.name ?? game?.participants?.[1]?.name ?? "Visitante";
       const league = game?.league?.name ?? game?.league_name ?? game?.competition?.name ?? "Liga não informada";
+      const date = game?.date ?? game?.starting_at ?? game?.fixture?.date ?? dateInput.value ?? today();
 
       const item = document.createElement("button");
       item.type = "button";
@@ -73,8 +105,24 @@
 
       if (fixtureId != null) {
         item.addEventListener("click", () => {
+          const key = String(fixtureId);
+          fixtureContexts[key] = {
+            referenceId: key,
+            provider,
+            date: String(date).slice(0, 10),
+            home,
+            away,
+            resolvedId: null
+          };
+
           document.dispatchEvent(new CustomEvent("greenEngineFixtureSelected", {
-            detail: { id: fixtureId, provider, league: game?.league || null, source: game }
+            detail: {
+              id: fixtureId,
+              provider,
+              league: game?.league || null,
+              source: game,
+              context: fixtureContexts[key]
+            }
           }));
         });
       } else {
