@@ -1,0 +1,90 @@
+document.addEventListener("greenEngineFixtureSelected", async event => {
+  const id = event.detail?.id;
+  const provider = String(event.detail?.provider || "api-football").toLowerCase();
+
+  if(!id){
+    console.warn("[Green Engine] Fixture selecionado sem ID.");
+    return;
+  }
+
+  const startedAt = performance.now();
+  const context = event.detail?.context || window.greenEngineFixtureContexts?.[String(id)] || {};
+
+  try{
+    setAnalysisStatus("pending", "CARREGANDO CONFRONTO…");
+    $("summaryBanner").className = "summary-banner state-idle";
+    $("summaryBannerText").textContent = "Carregando dados do jogo…";
+    showError(null);
+    showLoadingSkeletons();
+
+    await loadFixture(String(id), provider, context);
+
+    setAnalysisStatus("pending", "CARREGANDO HISTÓRICO…");
+    $("summaryBannerText").textContent = "Confronto ok — buscando histórico…";
+    if ($("historyStatus")) {
+      $("historyStatus").textContent = "Carregando histórico (pode levar alguns segundos)…";
+    }
+
+    try {
+      await loadHistory(String(id), provider, context);
+      setAnalysisStatus("done", "ANÁLISE CONCLUÍDA");
+      $("summaryBanner").className = "summary-banner";
+      $("summaryBannerText").textContent = "Análise concluída com sucesso";
+    } catch (histErr) {
+      console.warn("[Green Engine] Histórico pendente:", histErr);
+      const msg = histErr?.message || "Falha ao carregar histórico";
+      const is429 = histErr?.status === 429 || /limite|rate\s*limit|too many/i.test(msg);
+      setAnalysisStatus("done", is429 ? "CONFRONTO OK · AGUARDE" : "CONFRONTO OK · HISTÓRICO PENDENTE");
+      $("summaryBanner").className = "summary-banner state-idle";
+      $("summaryBannerText").textContent = is429
+        ? "Confronto carregado. Histórico limitado pela API — tente de novo em instantes."
+        : "Confronto carregado. Histórico indisponível no momento.";
+      if ($("historyStatus")) {
+        $("historyStatus").innerHTML = escapeHtml(msg) +
+          (is429
+            ? ' <button type="button" id="historyRetryBtn" class="block" style="margin-top:10px;width:auto;display:inline-block;padding:8px 14px;">Tentar histórico novamente</button>'
+            : "");
+        const btn = $("historyRetryBtn");
+        if (btn) {
+          btn.addEventListener("click", async () => {
+            btn.disabled = true;
+            btn.textContent = "Tentando…";
+            $("historyStatus").textContent = "Nova tentativa de histórico…";
+            try {
+              await loadHistory(String(id), provider, context);
+              setAnalysisStatus("done", "ANÁLISE CONCLUÍDA");
+              $("summaryBanner").className = "summary-banner";
+              $("summaryBannerText").textContent = "Análise concluída com sucesso";
+            } catch (e2) {
+              const m2 = e2?.message || "Falhou novamente";
+              $("historyStatus").innerHTML = escapeHtml(m2) +
+                ' <button type="button" id="historyRetryBtn2" class="block" style="margin-top:10px;width:auto;display:inline-block;padding:8px 14px;">Tentar de novo</button>';
+              const b2 = $("historyRetryBtn2");
+              if (b2) b2.addEventListener("click", () => {
+                b2.disabled = true;
+                loadHistory(String(id), provider, context).then(() => {
+                  setAnalysisStatus("done", "ANÁLISE CONCLUÍDA");
+                  $("summaryBanner").className = "summary-banner";
+                  $("summaryBannerText").textContent = "Análise concluída com sucesso";
+                }).catch(e3 => {
+                  $("historyStatus").textContent = e3?.message || "Falhou novamente";
+                });
+              });
+            }
+          });
+        }
+      }
+    }
+
+    const elapsedSeconds = ((performance.now() - startedAt) / 1000).toFixed(2);
+    $("summaryElapsed").textContent = elapsedSeconds + "s";
+    $("updatedAtValue").textContent = formatNowBR();
+
+  }catch(error){
+    console.error("[Green Engine] Erro ao carregar fixture selecionado:", error);
+    setAnalysisStatus("error", "ERRO NA ANÁLISE");
+    $("summaryBanner").className = "summary-banner state-error";
+    $("summaryBannerText").textContent = "Falha ao carregar o fixture";
+    showError(error.message || "Falha ao carregar o fixture.");
+  }
+});
