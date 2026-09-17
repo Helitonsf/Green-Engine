@@ -64,36 +64,43 @@
         });
       }
     } catch (error) {
-      console.warn("[Green Engine] Redirecionamento da API falhou:", error);
+      console.warn("[Green Engine] Proxy de API nao aplicado:", error);
     }
     return originalFetch(input, init);
   };
 
-  const dateInput = document.getElementById("gameDate");
-  const searchButton = document.getElementById("searchGamesBtn");
-  const status = document.getElementById("gamesSearchStatus");
-  const gamesList = document.getElementById("gamesList");
-  if (!dateInput || !searchButton || !status || !gamesList) return;
+  const dateInput = document.getElementById("search-date");
+  const searchButton = document.getElementById("search-btn");
+  const gamesList = document.getElementById("games-list");
+  const statusEl = document.getElementById("search-status");
 
-  const today = () => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  };
-
-  function setStatus(text) { status.textContent = text; }
-  function clearGames() { gamesList.innerHTML = ""; }
-
-  function getGames(data) {
-    if (Array.isArray(data)) return data;
-    if (Array.isArray(data?.data)) return data.data;
-    if (Array.isArray(data?.fixtures)) return data.fixtures;
-    if (Array.isArray(data?.results)) return data.results;
-    return [];
+  if (!dateInput || !searchButton || !gamesList) {
+    console.warn("[Green Engine] Elementos de pesquisa nao encontrados no DOM.");
+    return;
   }
 
-  function getParticipantByLocation(game, location) {
-    const participants = Array.isArray(game?.participants) ? game.participants : [];
-    return participants.find(p => String(p?.meta?.location || "").toLowerCase() === location) || null;
+  function today() {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  function setStatus(message) {
+    if (statusEl) statusEl.textContent = message || "";
+  }
+
+  function clearGames() {
+    gamesList.innerHTML = "";
+  }
+
+  function getGames(payload) {
+    if (Array.isArray(payload)) return payload;
+    if (Array.isArray(payload?.data)) return payload.data;
+    if (Array.isArray(payload?.fixtures)) return payload.fixtures;
+    if (Array.isArray(payload?.response)) return payload.response;
+    return [];
   }
 
   function renderGames(games) {
@@ -104,13 +111,12 @@
     }
 
     setStatus(`${games.length} jogo(s) encontrado(s).`);
+
     games.forEach(game => {
-      const fixtureId = game?.fixture_id ?? game?.fixtureId ?? game?.fixture?.id ?? game?.id;
-      const provider = String(game?.provider || "api-football").toLowerCase();
-      const homeParticipant = getParticipantByLocation(game, "home");
-      const awayParticipant = getParticipantByLocation(game, "away");
-      const home = game?.home_team?.name ?? game?.homeTeam?.name ?? game?.home?.name ?? game?.home_name ?? homeParticipant?.name ?? game?.participants?.[0]?.name ?? "Mandante";
-      const away = game?.away_team?.name ?? game?.awayTeam?.name ?? game?.away_name ?? game?.away?.name ?? awayParticipant?.name ?? game?.participants?.[1]?.name ?? "Visitante";
+      const fixtureId = game?.id ?? game?.fixture_id ?? game?.fixture?.id ?? null;
+      const provider = String(game?.provider || "api-football").toLowerCase(); // DEFAULT_PROVIDER=api-football
+      const home = game?.home?.name ?? game?.teams?.home?.name ?? game?.home_name ?? "Casa";
+      const away = game?.away?.name ?? game?.teams?.away?.name ?? game?.away_name ?? "Fora";
       const league = game?.league?.name ?? game?.league_name ?? game?.competition?.name ?? "Liga não informada";
       const date = game?.date ?? game?.starting_at ?? game?.fixture?.date ?? dateInput.value ?? today();
 
