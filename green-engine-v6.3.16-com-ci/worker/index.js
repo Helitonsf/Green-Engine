@@ -31,7 +31,6 @@ function buildCacheKey(request) {
   if (url.pathname === "/api/history") {
     const fixtureId = url.searchParams.get("fixture");
     if (fixtureId && /^\d+$/.test(fixtureId)) {
-      // Mesma partida = mesma chave, independente de home/away/date na query.
       const canonical = new URL(url.origin + url.pathname);
       canonical.searchParams.set("fixture", fixtureId);
       return new Request(canonical.toString(), { method: "GET" });
@@ -52,7 +51,6 @@ async function withCache(request, ctx, ttlSeconds, computeFn) {
     response.headers.set("Cache-Control", `public, max-age=${ttlSeconds}`);
     ctx.waitUntil(cache.put(cacheKey, response.clone()));
   } else if (response.status === 429) {
-    // Evita N usuários no mesmo jogo frio martelarem a API free em paralelo.
     const shortTtl = 15;
     response = new Response(response.body, response);
     response.headers.set("Cache-Control", `public, max-age=${shortTtl}`);
@@ -179,9 +177,6 @@ async function history(url, env) {
     away: url.searchParams.get("away") || ""
   };
 
-  // A+B: sem pré-resolve aqui. apiFootballHistory.resolveFixture já faz
-  // id → ids → date (mesma ordem do /api/fixture). Evita 2–6 requests
-  // duplicados só para achar o mesmo jogo no plano free.
   const result = await apiFootballHistory(fixtureId, env, context);
   if (result.statusCode >= 400) {
     result.body = {
@@ -198,6 +193,16 @@ async function history(url, env) {
 
 export default {
   async fetch(request, env, ctx) {
+    // Worker legado v6-3-16 sem API_FOOTBALL_KEY → redireciona UI e API para o v15
+    try {
+      const incoming = new URL(request.url);
+      if (incoming.hostname.includes("green-engine-v6-3-16-cf")) {
+        const target = new URL(request.url);
+        target.hostname = "green-engine-v6-3-15-cf.gerenteheliton.workers.dev";
+        return Response.redirect(target.toString(), 302);
+      }
+    } catch (_) {}
+
     if (request.method === "OPTIONS") return cors(request, json({ ok: true }), env);
     const url = new URL(request.url);
     let response;
