@@ -1,12 +1,18 @@
 import { normalizeGreenScoreOutput, calculateGreenScore } from "../history-core.js";
 import { fetchTeamRecentFixtures } from "./team-history.js";
+import { kvGetJson, kvPutJson, historyFixtureKey } from "../kv-cache.js";
 
 const API_FOOTBALL_BASE = "https://v3.football.api-sports.io";
 const FETCH_TIMEOUT_MS = 10000;
+
 const HISTORY_CANDIDATES = 8;
 const REQUIRED_HISTORY = 5;
+
 const MAX_DETAIL_FIXTURES = 10;
+
 const MAX_STATS_FETCHES = 6;
+/** TTL KV da análise completa por fixture (30 min). */
+const HISTORY_FIXTURE_TTL = 1800;
 
 async function apiFetch(path, apiKey) {
   const controller = new AbortController();
@@ -221,6 +227,23 @@ export async function apiFootballHistory(id, env, context = {}) {
     return { statusCode: 500, body: { ok: false, provider: "api-football", error: "API_FOOTBALL_KEY nao esta configurada no Cloudflare." } };
   }
 
+  const kv = env.HISTORY_KV || null;
+  const fixtureCacheKey = historyFixtureKey(id);
+  const cachedHistory = await kvGetJson(kv, fixtureCacheKey);
+  if (cachedHistory?.ok && cachedHistory?.history) {
+    return {
+      statusCode: 200,
+      body: {
+        ...cachedHistory,
+        diagnostic: {
+          ...(cachedHistory.diagnostic || {}),
+          fromKvCache: true,
+          kvKey: fixtureCacheKey
+        }
+      }
+    };
+  }
+
   const { fixture, attempts, lastResult } = await resolveFixture(id, env, context);
 
   if (!fixture) {
@@ -257,8 +280,8 @@ export async function apiFootballHistory(id, env, context = {}) {
   }
 
   const [homeFetch, awayFetch] = await Promise.all([
-    fetchTeamRecentFixtures(homeId, fixture, env.API_FOOTBALL_KEY),
-    fetchTeamRecentFixtures(awayId, fixture, env.API_FOOTBALL_KEY)
+    fetchTeamRecentFixtures(homeId, fixture, env.API_FOOTBALL_KEY, kv),
+    fetchTeamRecentFixtures(awayId, fixture, env.API_FOOTBALL_KEY, kv)
   ]);
   const homeCandidates = homeFetch.result;
   const awayCandidates = awayFetch.result;
@@ -431,40 +454,44 @@ export async function apiFootballHistory(id, env, context = {}) {
     awayVenueMatches
   ));
 
-  return {
-    statusCode: 200,
-    body: {
-      ok: true,
-      version: "6.3.16",
-      provider: "api-football",
-      fixture: {
-        id: Number(fixture.fixture.id),
-        name: `${fixture.teams.home.name} vs ${fixture.teams.away.name}`,
-        starting_at: fixture.fixture.date || null,
-        league: fixture.league?.name || null,
-        state: fixture.fixture?.status?.long || null,
-        home: { id: homeId, name: fixture.teams.home.name },
-        away: { id: awayId, name: fixture.teams.away.name }
-      },
-      history: {
-        home: homeHistory,
-        away: awayHistory
-      },
-      greenScore,
-      diagnostic: {
-        fixtureRequestOk: true,
-        currentFixtureExcluded: true,
-        homeHistoryCount: homeMatches.length,
-        awayHistoryCount: awayMatches.length,
-        homeVenueCount: homeVenueMatches.length,
-        awayVenueCount: awayVenueMatches.length,
-        homeVenueCorrect: homeVenueMatches.every(match => match.venue === "home"),
-        awayVenueCorrect: awayVenueMatches.every(match => match.venue === "away"),
-        allHistoryBeforeFixture: [...homeMatches, ...awayMatches].every(match => new Date(match.starting_at).getTime() < new Date(fixture.fixture.date).getTime()),
-        statsFetchesUsed: statsAttach.statsFetchesUsed,
-        statsRateLimited: statsAttach.statsRateLimited,
-        maxStatsFetches: MAX_STATS_FETCHES
-      }
+  const body = {
+    ok: true,
+    version: "6.3.16",
+    provider: "api-football",
+    fixture: {
+      id: Number(fixture.fixture.id),
+      name: `${fixture.teams.home.name} vs ${fixture.teams.away.name}`,
+      starting_at: fixture.fixture.date || null,
+      league: fixture.league?.name || null,
+      state: fixture.fixture?.status?.long || null,
+      home: { id: homeId, name: fixture.teams.home.name },
+      away: { id: awayId, name: fixture.teams.away.name }
+    },
+    history: {
+      home: homeHistory,
+      away: awayHistory
+    },
+    greenScore,
+    diagnostic: {
+      fixtureRequestOk: true,
+      currentFixtureExcluded: true,
+      homeHistoryCount: homeMatches.length,
+      awayHistoryCount: awayMatches.length,
+      homeVenueCount: homeVenueMatches.length,
+      awayVenueCount: awayVenueMatches.length,
+      homeVenueCorrect: homeVenueMatches.every(match => match.venue === "home"),
+      awayVenueCorrect: awayVenueMatches.every(match => match.venue === "away"),
+      allHistoryBeforeFixture: [...homeMatches, ...awayMatches].every(match => new Date(match.starting_at).getTime() < new Date(fixture.fixture.date).getTime()),
+      statsFetchesUsed: statsAttach.statsFetchesUsed,
+      statsRateLimited: statsAttach.statsRateLimited,
+      maxStatsFetches: MAX_STATS_FETCHES,
+      homeFromKv: Boolean(homeFetch.fromCache),
+      awayFromKv: Boolean(awayFetch.fromCache),
+      fromKvCache: false
     }
   };
+
+  await kvPutJson(kv, historyFixtureKey(String(fixture.fixture.id)), body, HISTORY_FIXTURE_TTL);
+
+  return { statusCode: 200, body };
 }
