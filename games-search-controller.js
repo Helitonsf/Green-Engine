@@ -5,7 +5,7 @@
   // Em produção (GitHub Pages) usa o Worker Cloudflare diretamente.
   const API_BASE = (typeof location !== "undefined" && /^(localhost|127\.0\.0\.1)$/.test(location.hostname))
     ? ""
-    : "https://green-engine-v6-3-15-cf.gerenteheliton.workers.dev";
+    : "https://green-engine-v6-3-16-cf.gerenteheliton.workers.dev";
   const originalFetch = window.fetch.bind(window);
   const fixtureContexts = window.greenEngineFixtureContexts = window.greenEngineFixtureContexts || {};
 
