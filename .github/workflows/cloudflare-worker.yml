@@ -10,6 +10,7 @@ on:
       - 'green-engine-v6.3.16-com-ci/package.json'
       - 'green-engine-v6.3.16-com-ci/package-lock.json'
       - 'green-engine-v6.3.16-com-ci/tests/**'
+      - 'green-engine-v6.3.16-com-ci/public/**'
       - '.github/workflows/cloudflare-worker.yml'
   workflow_dispatch:
 
@@ -40,6 +41,21 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Force provider default api-football in public UI
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("public/index.html")
+          if p.exists():
+            t = p.read_text(encoding="utf-8")
+            t2 = t.replace('provider = "sportmonks"', 'provider = "api-football"').replace('|| "sportmonks"', '|| "api-football"')
+            if t2 != t:
+              p.write_text(t2, encoding="utf-8")
+              print("public/index.html: sportmonks defaults -> api-football")
+            else:
+              print("public/index.html: already api-football or no sportmonks defaults")
+          PY
+
       - name: Validate Worker syntax
         run: >-
           node --check cloudflare/history-core.js &&
@@ -62,6 +78,18 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Force provider default api-football in public UI
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("public/index.html")
+          if p.exists():
+            t = p.read_text(encoding="utf-8")
+            t2 = t.replace('provider = "sportmonks"', 'provider = "api-football"').replace('|| "sportmonks"', '|| "api-football"')
+            p.write_text(t2, encoding="utf-8")
+            print("patched" if t2 != t else "no change")
+          PY
 
       - name: Deploy Worker to Cloudflare
         uses: cloudflare/wrangler-action@v3
