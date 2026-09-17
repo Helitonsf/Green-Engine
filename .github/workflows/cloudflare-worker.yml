@@ -43,8 +43,10 @@ jobs:
       - name: Validate Worker syntax
         run: >-
           node --check cloudflare/history-core.js &&
+          node --check cloudflare/kv-cache.js &&
           node --check cloudflare/providers/api-football.js &&
           node --check cloudflare/providers/api-football-history.js &&
+          node --check cloudflare/providers/team-history.js &&
           node --check cloudflare/providers/league-catalog.js &&
           node --check worker/index.js
 
