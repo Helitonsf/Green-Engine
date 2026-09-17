@@ -98,7 +98,7 @@ jobs:
       - name: Apply UI redesign patches
         run: python3 scripts/apply-ui-redesign.py
 
-      - name: Deploy Worker to Cloudflare
+      - name: Deploy Worker to Cloudflare (v6-3-15, primary with API key)
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -106,4 +106,15 @@ jobs:
           workingDirectory: green-engine-v6.3.16-com-ci
           command: deploy
 
-# Production deploy only runs after tests pass on main.
+      - name: Point wrangler name to legacy v6-3-16
+        run: |
+          sed -i 's/name = "green-engine-v6-3-15-cf"/name = "green-engine-v6-3-16-cf"/' wrangler.toml
+          grep '^name' wrangler.toml
+
+      - name: Deploy Worker to Cloudflare (v6-3-16, redirects to v15)
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: green-engine-v6.3.16-com-ci
+          command: deploy
