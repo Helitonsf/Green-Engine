@@ -22,10 +22,6 @@ function cors(request, response, env) {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
-/**
- * Cache edge com chave canônica para /api/history (só fixtureId) e
- * TTL curto para 429 (reduz stampede no plano free da API-Football).
- */
 function buildCacheKey(request) {
   const url = new URL(request.url);
   if (url.pathname === "/api/history") {
@@ -212,7 +208,11 @@ export default {
     else if (url.pathname === "/api/fixture") response = await withCache(request, ctx, CACHE_TTL.fixture, () => fixture(url, env));
     else if (url.pathname === "/api/history") response = await withCache(request, ctx, CACHE_TTL.history, () => history(url, env));
     else if (url.pathname === "/health") response = json({ ok: true, service: "green-engine-v6.3.16", timezone: "America/Sao_Paulo", leagueFilter: "curated", provider: "api-football" }, 200);
-    else response = json({ error: "Rota nao encontrada." }, 404);
+    else if (env.ASSETS) {
+      return env.ASSETS.fetch(request);
+    } else {
+      response = json({ error: "Rota nao encontrada." }, 404);
+    }
     return cors(request, response, env);
   }
 };
