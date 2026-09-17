@@ -175,5 +175,26 @@ if "sportsItem" not in html:
 else:
     print("fixture context already present")
 
+# --- Pacote 1-2: history lazy + 429 retry ---
+if "CARREGANDO HISTÓRICO" not in html and "historyRetryBtn" not in html:
+    snippet_path = Path(__file__).with_name("history-lazy-handler.js.snippet")
+    if snippet_path.exists():
+        new_handler = snippet_path.read_text(encoding="utf-8").strip()
+        start = html.find('document.addEventListener("greenEngineFixtureSelected"')
+        end = html.find('/* Ordenação por coluna na tabela de mercados */', start)
+        if start != -1 and end != -1:
+            html = html[:start] + new_handler + "\n\n" + html[end:]
+            print("history-lazy handler applied")
+        else:
+            print("WARN: could not locate fixture handler block")
+    else:
+        print("WARN: history-lazy snippet missing")
+
+_old_lh = "  if(!response.ok || data.error){\n    setApiStatus(false);\n    throw new Error(data.error || \"Falha na consulta do histórico\");\n  }"
+_new_lh = "  if(!response.ok || data.error){\n    setApiStatus(false);\n    const err = new Error(data.error || \"Falha na consulta do histórico\");\n    err.status = response.status;\n    err.retryable = response.status === 429 || /limite|rate\\s*limit|too many/i.test(String(data.error || \"\"));\n    throw err;\n  }"
+if _old_lh in html and "err.status = response.status" not in html:
+    html = html.replace(_old_lh, _new_lh, 1)
+    print("loadHistory 429 status preserved")
+
 p.write_text(html, encoding="utf-8")
 print("wrote", p.stat().st_size)
