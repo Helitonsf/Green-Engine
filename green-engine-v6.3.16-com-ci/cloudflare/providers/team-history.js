@@ -3,11 +3,16 @@
  * Free bloqueia last=/next= ("Free plans do not have access to the Last parameter").
  *
  * Ordem: season → from/to → last (pago).
+ * Com HISTORY_KV: reusa team+season entre jogos do mesmo time (TTL 1h).
  */
+
+import { kvGetJson, kvPutJson, teamSeasonKey } from "../kv-cache.js";
 
 const API_FOOTBALL_BASE = "https://v3.football.api-sports.io";
 const FETCH_TIMEOUT_MS = 10000;
 const HISTORY_CANDIDATES = 8;
+/** TTL KV para lista de jogos do time na temporada (1h). */
+const TEAM_SEASON_TTL = 3600;
 
 async function apiFetch(path, apiKey) {
   const controller = new AbortController();
@@ -48,16 +53,32 @@ function isPlanRestricted(result) {
 }
 
 /**
- * @returns {{ result, path, mode, rateLimited, planRestricted? }}
+ * @param {number|string} teamId
+ * @param {object} fixture fixture bruto API-Football
+ * @param {string} apiKey
+ * @param {KVNamespace|null|undefined} kv binding HISTORY_KV (opcional)
+ * @returns {{ result, path, mode, rateLimited, planRestricted?, fromCache? }}
  */
-export async function fetchTeamRecentFixtures(teamId, fixture, apiKey) {
+export async function fetchTeamRecentFixtures(teamId, fixture, apiKey, kv = null) {
   const season =
     Number(fixture?.league?.season) ||
     Number(String(fixture?.fixture?.date || "").slice(0, 4)) ||
     null;
 
-  // 1) team+season (funciona no free)
+  // 1) team+season (funciona no free) — com cache KV
   if (season) {
+    const cacheKey = teamSeasonKey(teamId, season);
+    const cached = await kvGetJson(kv, cacheKey);
+    if (cached && Array.isArray(cached.response)) {
+      return {
+        result: { ok: true, status: 200, data: { response: cached.response } },
+        path: `team=${teamId}&season=${season}`,
+        mode: "season",
+        rateLimited: false,
+        fromCache: true
+      };
+    }
+
     const bySeason = await apiFetch(
       `/fixtures?team=${teamId}&season=${season}&timezone=America/Sao_Paulo`,
       apiKey
@@ -67,6 +88,7 @@ export async function fetchTeamRecentFixtures(teamId, fixture, apiKey) {
     }
     const seasonRows = Array.isArray(bySeason.data?.response) ? bySeason.data.response : [];
     if (seasonRows.length) {
+      await kvPutJson(kv, cacheKey, { response: seasonRows }, TEAM_SEASON_TTL);
       return { result: bySeason, path: `team=${teamId}&season=${season}`, mode: "season", rateLimited: false };
     }
   }
