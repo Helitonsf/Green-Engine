@@ -11,6 +11,7 @@ on:
       - 'green-engine-v6.3.16-com-ci/package-lock.json'
       - 'green-engine-v6.3.16-com-ci/tests/**'
       - 'green-engine-v6.3.16-com-ci/public/**'
+      - 'green-engine-v6.3.16-com-ci/scripts/**'
       - '.github/workflows/cloudflare-worker.yml'
   workflow_dispatch:
 
@@ -56,6 +57,9 @@ jobs:
               print("public/index.html: already api-football or no sportmonks defaults")
           PY
 
+      - name: Apply UI redesign patches
+        run: python3 scripts/apply-ui-redesign.py
+
       - name: Validate Worker syntax
         run: >-
           node --check cloudflare/history-core.js &&
@@ -90,6 +94,9 @@ jobs:
             p.write_text(t2, encoding="utf-8")
             print("patched" if t2 != t else "no change")
           PY
+
+      - name: Apply UI redesign patches
+        run: python3 scripts/apply-ui-redesign.py
 
       - name: Deploy Worker to Cloudflare
         uses: cloudflare/wrangler-action@v3
