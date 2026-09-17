@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const API_BASE = "https://green-engine-v6-3-15-cf.gerenteheliton.workers.dev";
+  const API_BASE = "https://green-engine-v6-3-16-cf.gerenteheliton.workers.dev";
   const originalFetch = window.fetch.bind(window);
   const fixtureContexts = window.greenEngineFixtureContexts = window.greenEngineFixtureContexts || {};
 
@@ -114,7 +114,7 @@
 
     games.forEach(game => {
       const fixtureId = game?.id ?? game?.fixture_id ?? game?.fixture?.id ?? null;
-      const provider = String(game?.provider || "api-football").toLowerCase(); // DEFAULT_PROVIDER=api-football
+      const provider = String(game?.provider || "api-football").toLowerCase();
       const home = game?.home?.name ?? game?.teams?.home?.name ?? game?.home_name ?? "Casa";
       const away = game?.away?.name ?? game?.teams?.away?.name ?? game?.away_name ?? "Fora";
       const league = game?.league?.name ?? game?.league_name ?? game?.competition?.name ?? "Liga não informada";
