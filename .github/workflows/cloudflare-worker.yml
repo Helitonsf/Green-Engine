@@ -57,7 +57,7 @@ jobs:
               print("public/index.html: already api-football or no sportmonks defaults")
           PY
 
-      - name: Apply UI redesign patches
+      - name: Apply UI redesign + history-lazy patches
         run: python3 scripts/apply-ui-redesign.py
 
       - name: Validate Worker syntax
@@ -83,6 +83,16 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: green-engine-v6.3.16-com-ci/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Force provider default api-football in public UI
         run: |
           python3 - <<'PY'
@@ -95,8 +105,14 @@ jobs:
             print("patched" if t2 != t else "no change")
           PY
 
-      - name: Apply UI redesign patches
+      - name: Apply UI redesign + history-lazy patches
         run: python3 scripts/apply-ui-redesign.py
+
+      - name: Ensure HISTORY_KV namespace
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: bash scripts/ensure-history-kv.sh
 
       - name: Deploy Worker to Cloudflare (v6-3-15, primary with API key)
         uses: cloudflare/wrangler-action@v3
