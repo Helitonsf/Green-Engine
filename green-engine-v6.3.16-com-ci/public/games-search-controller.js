@@ -1,13 +1,13 @@
 (function () {
   "use strict";
 
-  // Same-origin no Worker e em localhost; Pages usa o Worker v6-3-16.
+  // Same-origin no Worker e em localhost; Pages usa o Worker v6-3-15 (com API_FOOTBALL_KEY).
   const API_BASE = (typeof location !== "undefined" && (
     /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ||
     /\.workers\.dev$/.test(location.hostname)
   ))
     ? ""
-    : "https://green-engine-v6-3-16-cf.gerenteheliton.workers.dev";
+    : "https://green-engine-v6-3-15-cf.gerenteheliton.workers.dev";
   const originalFetch = window.fetch.bind(window);
   const fixtureContexts = window.greenEngineFixtureContexts = window.greenEngineFixtureContexts || {};
 
