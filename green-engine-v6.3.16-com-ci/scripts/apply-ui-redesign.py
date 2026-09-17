@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Apply UI redesign patches to public/index.html before Worker deploy."""
+"""Apply UI redesign + fixture free-plan patches to public/index.html before deploy."""
 from pathlib import Path
 
 p = Path("public/index.html")
@@ -37,7 +37,6 @@ old_search = (
     '      <div id="gamesList" class="games-list"></div>\n'
     '    </div>'
 )
-
 new_search = (
     '    <div class="panel">\n'
     '      <h3>\n'
@@ -69,14 +68,9 @@ new_search = (
     '      <div id="gamesList" class="games-list"></div>\n'
     '    </div>'
 )
-
 if old_search in html:
     html = html.replace(old_search, new_search, 1)
     print("unified search panel")
-elif "Pesquisa" in html and "quickFilterInput" in html:
-    print("search already unified")
-else:
-    print("WARN: search pattern not found")
 
 html = html.replace('<div class="card-eyebrow">Mercado recomendado</div>', '<div class="card-eyebrow">★ Mercado recomendado</div>', 1)
 html = html.replace('<h3>Resumo da análise</h3>', '<h3>Resumo</h3>', 1)
@@ -88,7 +82,6 @@ if "Confrontação" not in html:
         '      <div class="card fixture-card">\n        <h3 style="margin-bottom:4px;">Confrontação</h3>\n        <div class="fixture-teams">',
         1,
     )
-    print("fixture label")
 
 old_gauge = (
     '      <div class="gauge-wrap">\n'
@@ -115,27 +108,68 @@ new_gauge = (
 )
 if old_gauge in html:
     html = html.replace(old_gauge, new_gauge, 1)
-    print("gauge gradient")
-elif "gaugeGradient" in html:
-    print("gauge already patched")
 
-# --- Fixture resolve: reuse sports snapshot + pass context (free plan) ---
 if "sportsItem" not in html:
-    html = html.replace(
-        'async function loadFixture(id, provider = "sportmonks"){\n  const response = await fetch("/api/fixture?id=" + encodeURIComponent(id) + "&provider=" + encodeURIComponent(provider));',
-        'async function loadFixture(id, provider = "api-football", context = {}){\n  const cached = context?.sportsItem || window.greenEngineFixtureContexts?.[String(id)]?.sportsItem;\n  if (cached && (cached.id || cached.fixture_id)) {\n    setApiStatus(true);\n    const fixture = cached;\n    const homeGuess = fixture.home?.name || String(fixture.name || "").split(/\\s+vs\\s+/i)[0] || "—";\n    const awayGuess = fixture.away?.name || (String(fixture.name || "").split(/\\s+vs\\s+/i)[1] || "—");\n    $("fixtureHomeName").textContent = homeGuess;\n    $("fixtureAwayName").textContent = awayGuess;\n    $("homeCrest").textContent = initials(homeGuess);\n    $("awayCrest").textContent = initials(awayGuess);\n    $("summaryGame").textContent = fixture.name || (`${homeGuess} vs ${awayGuess}`);\n    $("summaryLeague").textContent = fixture.league?.name || "—";\n    const rawDate = fixture.starting_at || fixture.date;\n    let fixtureDateBR = "—";\n    if (rawDate) { try { fixtureDateBR = new Date(String(rawDate)).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }); } catch { fixtureDateBR = String(rawDate).slice(0, 16); } }\n    $("summaryDate").textContent = fixtureDateBR;\n    $("fixtureMeta").textContent = [fixture.league?.name, fixtureDateBR].filter(Boolean).join(" · ");\n    return fixture;\n  }\n  const qs = new URLSearchParams({ id: String(id), provider: String(provider) });\n  if (context?.date) qs.set("date", String(context.date).slice(0, 10));\n  if (context?.home) qs.set("home", context.home);\n  if (context?.away) qs.set("away", context.away);\n  const response = await fetch("/api/fixture?" + qs.toString());'
-    )
-    html = html.replace(
-        'async function loadHistory(id, provider = "sportmonks"){\n  const response = await fetch("/api/history?fixture=" + encodeURIComponent(id) + "&provider=" + encodeURIComponent(provider));',
-        'async function loadHistory(id, provider = "api-football", context = {}){\n  const qs = new URLSearchParams({ fixture: String(id), provider: String(provider) });\n  if (context?.date) qs.set("date", String(context.date).slice(0, 10));\n  if (context?.home) qs.set("home", context.home);\n  if (context?.away) qs.set("away", context.away);\n  const response = await fetch("/api/history?" + qs.toString());'
-    )
+    new_lf = '''async function loadFixture(id, provider = "api-football", context = {}){
+  const cached = context?.sportsItem || window.greenEngineFixtureContexts?.[String(id)]?.sportsItem;
+  if (cached && (cached.id || cached.fixture_id)) {
+    setApiStatus(true);
+    const fixture = cached;
+    const homeGuess = fixture.home?.name || String(fixture.name || "").split(/\\s+vs\\s+/i)[0] || "—";
+    const awayGuess = fixture.away?.name || (String(fixture.name || "").split(/\\s+vs\\s+/i)[1] || "—");
+    $("fixtureHomeName").textContent = homeGuess;
+    $("fixtureAwayName").textContent = awayGuess;
+    $("homeCrest").textContent = initials(homeGuess);
+    $("awayCrest").textContent = initials(awayGuess);
+    $("summaryGame").textContent = fixture.name || (`${homeGuess} vs ${awayGuess}`);
+    $("summaryLeague").textContent = fixture.league?.name || "—";
+    const rawDate = fixture.starting_at || fixture.date;
+    let fixtureDateBR = "—";
+    if (rawDate) { try { fixtureDateBR = new Date(String(rawDate)).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }); } catch { fixtureDateBR = String(rawDate).slice(0, 16); } }
+    $("summaryDate").textContent = fixtureDateBR;
+    $("fixtureMeta").textContent = [fixture.league?.name, fixtureDateBR].filter(Boolean).join(" · ");
+    return fixture;
+  }
+  const qs = new URLSearchParams({ id: String(id), provider: String(provider) });
+  if (context?.date) qs.set("date", String(context.date).slice(0, 10));
+  if (context?.home) qs.set("home", context.home);
+  if (context?.away) qs.set("away", context.away);
+  const response = await fetch("/api/fixture?" + qs.toString());'''
+
+    for default_provider in ("sportmonks", "api-football"):
+        old_lf = (
+            f'async function loadFixture(id, provider = "{default_provider}"){{\n'
+            '  const response = await fetch("/api/fixture?id=" + encodeURIComponent(id) + "&provider=" + encodeURIComponent(provider));'
+        )
+        if old_lf in html:
+            html = html.replace(old_lf, new_lf, 1)
+            print("loadFixture patched from", default_provider)
+            break
+
+    new_lh = '''async function loadHistory(id, provider = "api-football", context = {}){
+  const qs = new URLSearchParams({ fixture: String(id), provider: String(provider) });
+  if (context?.date) qs.set("date", String(context.date).slice(0, 10));
+  if (context?.home) qs.set("home", context.home);
+  if (context?.away) qs.set("away", context.away);
+  const response = await fetch("/api/history?" + qs.toString());'''
+
+    for default_provider in ("sportmonks", "api-football"):
+        old_lh = (
+            f'async function loadHistory(id, provider = "{default_provider}"){{\n'
+            '  const response = await fetch("/api/history?fixture=" + encodeURIComponent(id) + "&provider=" + encodeURIComponent(provider));'
+        )
+        if old_lh in html:
+            html = html.replace(old_lh, new_lh, 1)
+            print("loadHistory patched from", default_provider)
+            break
+
     html = html.replace(
         '    await loadFixture(String(id), provider);\n    await loadHistory(String(id), provider);',
-        '    const context = event.detail?.context || window.greenEngineFixtureContexts?.[String(id)] || {};\n    await loadFixture(String(id), provider, context);\n    await loadHistory(String(id), provider, context);'
+        '    const context = event.detail?.context || window.greenEngineFixtureContexts?.[String(id)] || {};\n    await loadFixture(String(id), provider, context);\n    await loadHistory(String(id), provider, context);',
     )
     html = html.replace(
         'const provider = String(event.detail?.provider || "sportmonks").toLowerCase();',
-        'const provider = String(event.detail?.provider || "api-football").toLowerCase();'
+        'const provider = String(event.detail?.provider || "api-football").toLowerCase();',
     )
     print("fixture context patches applied")
 else:
