@@ -119,5 +119,27 @@ if old_gauge in html:
 elif "gaugeGradient" in html:
     print("gauge already patched")
 
+# --- Fixture resolve: reuse sports snapshot + pass context (free plan) ---
+if "sportsItem" not in html:
+    html = html.replace(
+        'async function loadFixture(id, provider = "sportmonks"){\n  const response = await fetch("/api/fixture?id=" + encodeURIComponent(id) + "&provider=" + encodeURIComponent(provider));',
+        'async function loadFixture(id, provider = "api-football", context = {}){\n  const cached = context?.sportsItem || window.greenEngineFixtureContexts?.[String(id)]?.sportsItem;\n  if (cached && (cached.id || cached.fixture_id)) {\n    setApiStatus(true);\n    const fixture = cached;\n    const homeGuess = fixture.home?.name || String(fixture.name || "").split(/\\s+vs\\s+/i)[0] || "—";\n    const awayGuess = fixture.away?.name || (String(fixture.name || "").split(/\\s+vs\\s+/i)[1] || "—");\n    $("fixtureHomeName").textContent = homeGuess;\n    $("fixtureAwayName").textContent = awayGuess;\n    $("homeCrest").textContent = initials(homeGuess);\n    $("awayCrest").textContent = initials(awayGuess);\n    $("summaryGame").textContent = fixture.name || (`${homeGuess} vs ${awayGuess}`);\n    $("summaryLeague").textContent = fixture.league?.name || "—";\n    const rawDate = fixture.starting_at || fixture.date;\n    let fixtureDateBR = "—";\n    if (rawDate) { try { fixtureDateBR = new Date(String(rawDate)).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }); } catch { fixtureDateBR = String(rawDate).slice(0, 16); } }\n    $("summaryDate").textContent = fixtureDateBR;\n    $("fixtureMeta").textContent = [fixture.league?.name, fixtureDateBR].filter(Boolean).join(" · ");\n    return fixture;\n  }\n  const qs = new URLSearchParams({ id: String(id), provider: String(provider) });\n  if (context?.date) qs.set("date", String(context.date).slice(0, 10));\n  if (context?.home) qs.set("home", context.home);\n  if (context?.away) qs.set("away", context.away);\n  const response = await fetch("/api/fixture?" + qs.toString());'
+    )
+    html = html.replace(
+        'async function loadHistory(id, provider = "sportmonks"){\n  const response = await fetch("/api/history?fixture=" + encodeURIComponent(id) + "&provider=" + encodeURIComponent(provider));',
+        'async function loadHistory(id, provider = "api-football", context = {}){\n  const qs = new URLSearchParams({ fixture: String(id), provider: String(provider) });\n  if (context?.date) qs.set("date", String(context.date).slice(0, 10));\n  if (context?.home) qs.set("home", context.home);\n  if (context?.away) qs.set("away", context.away);\n  const response = await fetch("/api/history?" + qs.toString());'
+    )
+    html = html.replace(
+        '    await loadFixture(String(id), provider);\n    await loadHistory(String(id), provider);',
+        '    const context = event.detail?.context || window.greenEngineFixtureContexts?.[String(id)] || {};\n    await loadFixture(String(id), provider, context);\n    await loadHistory(String(id), provider, context);'
+    )
+    html = html.replace(
+        'const provider = String(event.detail?.provider || "sportmonks").toLowerCase();',
+        'const provider = String(event.detail?.provider || "api-football").toLowerCase();'
+    )
+    print("fixture context patches applied")
+else:
+    print("fixture context already present")
+
 p.write_text(html, encoding="utf-8")
 print("wrote", p.stat().st_size)
