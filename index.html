@@ -2,11 +2,22 @@
 <html lang="pt-BR">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Green Engine — Dashboard</title>
-<!-- FIXED_DEFAULT_PROVIDER_API_FOOTBALL -->
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Green Engine v6.3.16</title>
+<style>:root{--bg:#080b10;--panel:#0e1218;--panel2:#11161d;--card:#12171f;--border:#232a35;--border-soft:#1a2029;--text:#f3f6fb;--muted:#8b95a6;--muted-soft:#6d7789;--green:#22c55e;--green2:#4ade80;--green-dim:rgba(34,197,94,.12);--red:#f66565;--red-dim:rgba(246,101,101,.12);--yellow:#f4c95d;--yellow-dim:rgba(244,201,93,.12);--blue:#5b9bff;--blue-dim:rgba(91,155,255,.12);--shadow:0 10px 26px rgba(0,0,0,.35)}</style>
+<script>
+// Bootstrap: carrega o dashboard completo do Worker (fonte unica api-football).
+(function(){
+  var WORKER = "https://green-engine-v6-3-15-cf.gerenteheliton.workers.dev";
+  // Preferir HTML servido pelo Worker (assets public/), ja com defaults api-football apos deploy.
+  if (location.hostname.indexOf("github.io") !== -1) {
+    location.replace(WORKER + "/");
+  }
+})();
+</script>
 </head>
-<body>
-<p>placeholder-will-replace</p>
+<body style="margin:0;font-family:Segoe UI,Arial,sans-serif;background:#080b10;color:#f3f6fb;padding:24px">
+  <p>Redirecionando para o dashboard Green Engine (API-Football)…</p>
+  <p><a href="https://green-engine-v6-3-15-cf.gerenteheliton.workers.dev/" style="color:#4ade80">Abrir dashboard</a></p>
 </body>
 </html>
