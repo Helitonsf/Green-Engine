@@ -1,6 +1,8 @@
 import { apiFootballConfigured, apiFootballLeagues, apiFootballBetTypes, apiFootballSports, apiFootballFixture } from "../cloudflare/providers/api-football.js";
 import { apiFootballHistory } from "../cloudflare/providers/api-football-history.js";
 import { isAllowedLeague } from "../cloudflare/providers/league-catalog.js";
+import { footballDataConfigured, footballDataSports, footballDataFixture } from "../cloudflare/providers/football-data.js";
+import { footballDataHistory } from "../cloudflare/providers/football-data-history.js";
 
 const JSON_HEADERS = { "Content-Type": "application/json; charset=utf-8" };
 const CACHE_TTL = { sports: 120, leagues: 3600, markets: 86400, fixture: 60, history: 300 };
@@ -57,29 +59,77 @@ async function withCache(request, ctx, ttlSeconds, computeFn) {
 
 async function sports(url, env) {
   const date = url.searchParams.get("date");
-  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    return json({ error: "Data invalida. Use AAAA-MM-DD." }, 400);
-  }
-  if (!apiFootballConfigured(env)) {
-    return json({ error: "API_FOOTBALL_KEY nao esta configurada no Cloudflare.", providerMode: "api-football" }, 500);
+  if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return json({ error: "Data invalida. Use AAAA-MM-DD." }, 400);
+
+  const preferred = String(url.searchParams.get("provider") || "auto").toLowerCase();
+  const sources = {};
+  let data = [];
+  let providerMode = "none";
+  let primaryRateLimited = false;
+
+  const tryApiFootball = preferred === "auto" || preferred === "api-football";
+  const tryFootballData = preferred === "auto" || preferred === "football-data";
+
+  if (tryApiFootball && apiFootballConfigured(env)) {
+    const result = await apiFootballSports(date, env);
+    const rows = Array.isArray(result?.data) ? result.data : (Array.isArray(result) ? result : []);
+    const filtered = rows.filter(g => isAllowedLeague(g?.league || {}));
+    const errors = result?.diagnostic?.errors ?? result?.errors ?? null;
+    const rateLimited = Boolean(
+      result?.rateLimited ||
+      (errors && /rate\s*limit|too many requests/i.test(JSON.stringify(errors)))
+    );
+    sources.apiFootball = {
+      configured: true,
+      count: filtered.length,
+      status: result?.diagnostic?.status ?? null,
+      errors,
+      rateLimited
+    };
+    if (rateLimited) primaryRateLimited = true;
+    if (filtered.length) {
+      data = filtered;
+      providerMode = "api-football";
+    }
+  } else if (tryApiFootball) {
+    sources.apiFootball = { configured: false };
   }
 
-  const result = await apiFootballSports(date, env);
-  const data = (Array.isArray(result?.data) ? result.data : []).filter(fixture => isAllowedLeague(fixture?.league || {}));
+  if ((!data.length || primaryRateLimited) && tryFootballData && footballDataConfigured(env)) {
+    const fd = await footballDataSports(date, env);
+    sources.footballData = fd.diagnostic || { configured: true, count: (fd.data || []).length };
+    if ((fd.data || []).length) {
+      if (!data.length) {
+        data = fd.data;
+        providerMode = primaryRateLimited ? "football-data (fallback)" : "football-data";
+      } else {
+        const seen = new Set(data.map(g => String(g.id)));
+        for (const g of fd.data) {
+          if (!seen.has(String(g.id))) data.push(g);
+        }
+        providerMode = "api-football+football-data";
+      }
+    }
+  } else if (tryFootballData) {
+    sources.footballData = { configured: footballDataConfigured(env) };
+  }
 
   if (!data.length) {
+    const status = primaryRateLimited ? 429 : 404;
     return json({
-      error: "Nenhum jogo encontrado para esta data no API-Football dentro do catalogo Green Engine.",
-      providerMode: "api-football",
-      sources: { apiFootball: { configured: true, count: 0, status: result?.diagnostic?.status ?? null, errors: result?.diagnostic?.errors ?? null } }
-    }, 404);
+      error: primaryRateLimited
+        ? "Limite da API-Football atingido e nenhum jogo no provider de fallback para esta data."
+        : "Nenhum jogo encontrado para esta data no catalogo Green Engine.",
+      providerMode,
+      sources
+    }, status);
   }
 
   return json({
-    providerMode: "api-football",
+    providerMode,
     data,
-    sources: { apiFootball: { configured: true, count: data.length, status: result?.diagnostic?.status ?? null, errors: result?.diagnostic?.errors ?? null } },
-    meta: { total: data.length, date, timezone: "America/Sao_Paulo", leagueFilter: "curated", provider: "api-football" }
+    sources,
+    meta: { total: data.length, date, timezone: "America/Sao_Paulo", leagueFilter: "curated", provider: providerMode }
   }, 200);
 }
 
@@ -120,53 +170,94 @@ async function markets(env) {
 async function fixture(url, env) {
   const id = url.searchParams.get("id");
   if (!id || !/^\d+$/.test(id)) return json({ error: "Informe um fixture ID numerico." }, 400);
-  if (!apiFootballConfigured(env)) return json({ error: "API_FOOTBALL_KEY nao esta configurada no Cloudflare." }, 500);
 
   const context = {
     date: url.searchParams.get("date") || "",
     home: url.searchParams.get("home") || "",
     away: url.searchParams.get("away") || ""
   };
-  const data = await apiFootballFixture(id, env, context);
-  if (data?.__rateLimited) {
-    return json({
-      error: "Limite de requisicoes da API-Football atingido. Aguarde alguns segundos e tente novamente.",
-      diagnostic: { requestedId: id, context, stage: data.stage, upstream: data.diagnostic }
-    }, 429);
+  const preferred = String(url.searchParams.get("provider") || "auto").toLowerCase();
+
+  if ((preferred === "auto" || preferred === "api-football") && apiFootballConfigured(env)) {
+    const data = await apiFootballFixture(id, env, context);
+    if (data?.__rateLimited) {
+      if (footballDataConfigured(env)) {
+        const fd = await footballDataFixture(id, env, context);
+        if (fd && !fd.__rateLimited) {
+          return json({ provider: "football-data", data: fd, fallbackFrom: "api-football-rate-limit" }, 200);
+        }
+      }
+      return json({
+        error: "Limite de requisicoes da API-Football atingido.",
+        rateLimited: true,
+        diagnostic: data.diagnostic || null
+      }, 429);
+    }
+    if (data) {
+      if (!isAllowedLeague(data?.league || {})) {
+        return json({ error: "A liga do fixture nao esta no catalogo Green Engine." }, 404);
+      }
+      return json({ provider: "api-football", data }, 200);
+    }
   }
-  if (!data) {
-    return json({
-      error: "API-Football nao encontrou o fixture solicitado nem conseguiu resolver a referencia pelo contexto da partida.",
-      diagnostic: { requestedId: id, context }
-    }, 404);
+
+  if ((preferred === "auto" || preferred === "football-data") && footballDataConfigured(env)) {
+    const fd = await footballDataFixture(id, env, context);
+    if (fd?.__rateLimited) {
+      return json({ error: "Limite de requisicoes do football-data.org atingido.", rateLimited: true }, 429);
+    }
+    if (fd) return json({ provider: "football-data", data: fd }, 200);
   }
-  if (!isAllowedLeague(data?.league || {})) return json({ error: "A liga do fixture nao esta no catalogo Green Engine." }, 404);
-  return json({ provider: "api-football", data }, 200);
+
+  if (!apiFootballConfigured(env) && !footballDataConfigured(env)) {
+    return json({ error: "Nenhuma chave de provider configurada (API_FOOTBALL_KEY / FOOTBALL_DATA_API_KEY)." }, 500);
+  }
+
+  return json({
+    error: "Fixture nao encontrado nem pelo provider primario nem pelo fallback (envie date+home+away se o ID for de outra API).",
+  }, 404);
 }
 
 async function history(url, env) {
   const fixtureId = url.searchParams.get("fixture");
   if (!fixtureId || !/^\d+$/.test(fixtureId)) return json({ error: "Informe um fixture ID numerico." }, 400);
-  if (!apiFootballConfigured(env)) return json({ error: "API_FOOTBALL_KEY nao esta configurada no Cloudflare." }, 500);
 
   const context = {
     date: url.searchParams.get("date") || "",
     home: url.searchParams.get("home") || "",
     away: url.searchParams.get("away") || ""
   };
+  const preferred = String(url.searchParams.get("provider") || "auto").toLowerCase();
 
-  const result = await apiFootballHistory(fixtureId, env, context);
-  if (result.statusCode >= 400) {
-    result.body = {
-      ...result.body,
-      diagnostic: {
-        ...(result.body?.diagnostic || {}),
-        requestedFixture: fixtureId,
-        context
+  const tryPrimary = preferred === "auto" || preferred === "api-football";
+  const tryFallback = preferred === "auto" || preferred === "football-data";
+
+  if (tryPrimary && apiFootballConfigured(env)) {
+    const result = await apiFootballHistory(fixtureId, env, context);
+    if (result.statusCode === 200) {
+      return json(result.body, 200);
+    }
+    const is429 = result.statusCode === 429 || /limite de requisicoes|rate\s*limit/i.test(String(result.body?.error || ""));
+    if (is429 && tryFallback && footballDataConfigured(env)) {
+      const fd = await footballDataHistory(fixtureId, env, context);
+      if (fd.statusCode === 200) {
+        fd.body.diagnostic = { ...(fd.body.diagnostic || {}), fallbackFrom: "api-football-rate-limit" };
+        return json(fd.body, 200);
       }
-    };
+      return json({
+        ...(result.body || {}),
+        fallback: { provider: "football-data", status: fd.statusCode, error: fd.body?.error }
+      }, 429);
+    }
+    return json(result.body || { ok: false, error: "Falha no historico" }, result.statusCode || 500);
   }
-  return json(result.body, result.statusCode);
+
+  if (tryFallback && footballDataConfigured(env)) {
+    const fd = await footballDataHistory(fixtureId, env, context);
+    return json(fd.body, fd.statusCode);
+  }
+
+  return json({ error: "Nenhuma chave de provider configurada (API_FOOTBALL_KEY / FOOTBALL_DATA_API_KEY)." }, 500);
 }
 
 export default {
@@ -188,7 +279,7 @@ export default {
     else if (url.pathname === "/api/markets") response = await withCache(request, ctx, CACHE_TTL.markets, () => markets(env));
     else if (url.pathname === "/api/fixture") response = await withCache(request, ctx, CACHE_TTL.fixture, () => fixture(url, env));
     else if (url.pathname === "/api/history") response = await withCache(request, ctx, CACHE_TTL.history, () => history(url, env));
-    else if (url.pathname === "/health") response = json({ ok: true, service: "green-engine-v6.3.16", timezone: "America/Sao_Paulo", leagueFilter: "curated", provider: "api-football" }, 200);
+    else if (url.pathname === "/health") response = json({ ok: true, service: "green-engine-v6.3.16", timezone: "America/Sao_Paulo", leagueFilter: "curated", providers: { apiFootball: apiFootballConfigured(env), footballData: footballDataConfigured(env) }, providerMode: "auto-fallback" }, 200);
     else if (env.ASSETS) {
       return env.ASSETS.fetch(request);
     } else {
