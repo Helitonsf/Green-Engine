@@ -68,6 +68,8 @@ jobs:
           node --check cloudflare/providers/api-football-history.js &&
           node --check cloudflare/providers/team-history.js &&
           node --check cloudflare/providers/league-catalog.js &&
+          node --check cloudflare/providers/football-data.js &&
+          node --check cloudflare/providers/football-data-history.js &&
           node --check worker/index.js
 
       - name: Run tests
