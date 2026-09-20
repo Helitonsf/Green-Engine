@@ -1,6 +1,6 @@
 document.addEventListener("greenEngineFixtureSelected", async event => {
   const id = event.detail?.id;
-  const provider = String(event.detail?.provider || "api-football").toLowerCase();
+  const provider = String(event.detail?.provider || "auto").toLowerCase();
 
   if(!id){
     console.warn("[Green Engine] Fixture selecionado sem ID.");
@@ -20,7 +20,7 @@ document.addEventListener("greenEngineFixtureSelected", async event => {
     await loadFixture(String(id), provider, context);
 
     setAnalysisStatus("pending", "CARREGANDO HISTÓRICO…");
-    $("summaryBannerText").textContent = "Confronto ok — buscando histórico…";
+    $("summaryBannerText").textContent = "Confronto ok — buscando histórico (com fallback se a API principal estiver no limite)…";
     if ($("historyStatus")) {
       $("historyStatus").textContent = "Carregando histórico (pode levar alguns segundos)…";
     }
@@ -34,10 +34,10 @@ document.addEventListener("greenEngineFixtureSelected", async event => {
       console.warn("[Green Engine] Histórico pendente:", histErr);
       const msg = histErr?.message || "Falha ao carregar histórico";
       const is429 = histErr?.status === 429 || /limite|rate\s*limit|too many/i.test(msg);
-      setAnalysisStatus("done", is429 ? "CONFRONTO OK · AGUARDE" : "CONFRONTO OK · HISTÓRICO PENDENTE");
+      setAnalysisStatus("done", is429 ? "CONFRONTO OK · API NO LIMITE" : "CONFRONTO OK · HISTÓRICO PENDENTE");
       $("summaryBanner").className = "summary-banner state-idle";
       $("summaryBannerText").textContent = is429
-        ? "Confronto carregado. Histórico limitado pela API — tente de novo em instantes."
+        ? "API-Football no limite. Histórico pendente — aguarde ou use jogo das ligas free (fallback)."
         : "Confronto carregado. Histórico indisponível no momento.";
       if ($("historyStatus")) {
         $("historyStatus").innerHTML = escapeHtml(msg) +
