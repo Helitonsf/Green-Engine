@@ -68,9 +68,11 @@ async function sports(url, env) {
   let primaryRateLimited = false;
 
   const tryApiFootball = preferred === "auto" || preferred === "api-football";
-  const tryFootballData = preferred === "auto" || preferred === "football-data";
+  const tryFootballData = preferred !== "api-football-only";
+  const onlyFootballData = preferred === "football-data";
+  const skipApiFootball = onlyFootballData;
 
-  if (tryApiFootball && apiFootballConfigured(env)) {
+  if (tryApiFootball && !skipApiFootball && apiFootballConfigured(env)) {
     const result = await apiFootballSports(date, env);
     const rows = Array.isArray(result?.data) ? result.data : (Array.isArray(result) ? result : []);
     const filtered = rows.filter(g => isAllowedLeague(g?.league || {}));
@@ -118,7 +120,7 @@ async function sports(url, env) {
     const status = primaryRateLimited ? 429 : 404;
     return json({
       error: primaryRateLimited
-        ? "Limite da API-Football atingido e nenhum jogo no provider de fallback para esta data."
+        ? "API-Football no limite. Fallback football-data sem jogos nesta data (12 ligas free). Tente outra data ou aguarde a cota."
         : "Nenhum jogo encontrado para esta data no catalogo Green Engine.",
       providerMode,
       sources
@@ -178,7 +180,7 @@ async function fixture(url, env) {
   };
   const preferred = String(url.searchParams.get("provider") || "auto").toLowerCase();
 
-  if ((preferred === "auto" || preferred === "api-football") && apiFootballConfigured(env)) {
+  if ((preferred === "auto" || preferred === "api-football") && preferred !== "football-data" && apiFootballConfigured(env)) {
     const data = await apiFootballFixture(id, env, context);
     if (data?.__rateLimited) {
       if (footballDataConfigured(env)) {
@@ -188,7 +190,7 @@ async function fixture(url, env) {
         }
       }
       return json({
-        error: "Limite de requisicoes da API-Football atingido.",
+        error: "API-Football no limite. Fallback sem fixture correspondente (envie date+home+away ou use liga free).",
         rateLimited: true,
         diagnostic: data.diagnostic || null
       }, 429);
@@ -201,7 +203,7 @@ async function fixture(url, env) {
     }
   }
 
-  if ((preferred === "auto" || preferred === "football-data") && footballDataConfigured(env)) {
+  if ((preferred === "auto" || preferred === "api-football" || preferred === "football-data") && footballDataConfigured(env)) {
     const fd = await footballDataFixture(id, env, context);
     if (fd?.__rateLimited) {
       return json({ error: "Limite de requisicoes do football-data.org atingido.", rateLimited: true }, 429);
@@ -230,9 +232,9 @@ async function history(url, env) {
   const preferred = String(url.searchParams.get("provider") || "auto").toLowerCase();
 
   const tryPrimary = preferred === "auto" || preferred === "api-football";
-  const tryFallback = preferred === "auto" || preferred === "football-data";
+  const tryFallback = preferred === "auto" || preferred === "api-football" || preferred === "football-data";
 
-  if (tryPrimary && apiFootballConfigured(env)) {
+  if (tryPrimary && preferred !== "football-data" && apiFootballConfigured(env)) {
     const result = await apiFootballHistory(fixtureId, env, context);
     if (result.statusCode === 200) {
       return json(result.body, 200);
@@ -245,7 +247,10 @@ async function history(url, env) {
         return json(fd.body, 200);
       }
       return json({
-        ...(result.body || {}),
+        ok: false,
+        provider: "api-football",
+        error: "API-Football no limite. Fallback tentado sem sucesso — use data+home+away ou jogo das ligas free.",
+        diagnostic: result.body?.diagnostic || null,
         fallback: { provider: "football-data", status: fd.statusCode, error: fd.body?.error }
       }, 429);
     }
