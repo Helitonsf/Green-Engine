@@ -1,23 +1,93 @@
-(() => {
-  const API_BASE = (() => {
-    try {
-      if (typeof window !== "undefined" && window.location && /workers\.dev$/i.test(window.location.hostname)) {
-        return "";
-      }
-    } catch (_) {}
-    return "https://green-engine-v6-3-15-cf.gerenteheliton.workers.dev";
-  })();
+(function () {
+  "use strict";
 
+  // Same-origin no Worker e em localhost; Pages usa o Worker v6-3-15 (com API_FOOTBALL_KEY).
+  const API_BASE = (typeof location !== "undefined" && (
+    /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ||
+    /\.workers\.dev$/.test(location.hostname)
+  ))
+    ? ""
+    : "https://green-engine-v6-3-15-cf.gerenteheliton.workers.dev";
   const originalFetch = window.fetch.bind(window);
-  const fixtureContexts = {};
-  window.greenEngineFixtureContexts = fixtureContexts;
+  const fixtureContexts = window.greenEngineFixtureContexts = window.greenEngineFixtureContexts || {};
+
+  function getContextForId(id) {
+    return fixtureContexts[String(id)] || null;
+  }
+
+  function withFixtureContext(url) {
+    try {
+      const parsed = new URL(url, window.location.href);
+      if (!parsed.pathname.startsWith("/api/")) return url;
+
+      if (parsed.pathname === "/api/fixture") {
+        const id = parsed.searchParams.get("id");
+        const context = getContextForId(id);
+        if (context) {
+          if (context.date) parsed.searchParams.set("date", context.date);
+          if (context.home) parsed.searchParams.set("home", context.home);
+          if (context.away) parsed.searchParams.set("away", context.away);
+        }
+      }
+
+      if (parsed.pathname === "/api/history") {
+        const requestedId = parsed.searchParams.get("fixture");
+        const context = getContextForId(requestedId);
+        if (context) {
+          if (context.resolvedId) {
+            parsed.searchParams.set("fixture", context.resolvedId);
+          }
+          if (context.date) parsed.searchParams.set("date", context.date);
+          if (context.home) parsed.searchParams.set("home", context.home);
+          if (context.away) parsed.searchParams.set("away", context.away);
+        }
+      }
+
+      return parsed.toString();
+    } catch (error) {
+      console.warn("[Green Engine] Contexto de fixture nao aplicado:", error);
+      return url;
+    }
+  }
+
+  window.fetch = function (input, init) {
+    try {
+      const rawUrl = typeof input === "string" ? input : input?.url || "";
+      if (rawUrl.startsWith("/api/")) {
+        const target = withFixtureContext(API_BASE + rawUrl);
+        const parsedTarget = new URL(target);
+
+        return originalFetch(target, init).then(response => {
+          if (parsedTarget.pathname === "/api/fixture" && response.ok) {
+            response.clone().json().then(payload => {
+              const requestedId = parsedTarget.searchParams.get("id");
+              const resolvedId = payload?.data?.id ?? payload?.data?.fixture_id ?? null;
+              if (requestedId && resolvedId != null) {
+                const context = getContextForId(requestedId);
+                if (context) context.resolvedId = String(resolvedId);
+              }
+            }).catch(() => {});
+          }
+          return response;
+        });
+      }
+    } catch (error) {
+      console.warn("[Green Engine] Redirecionamento da API falhou:", error);
+    }
+    return originalFetch(input, init);
+  };
+
+  const dateInput = document.getElementById("gameDate");
+  const searchButton = document.getElementById("searchGamesBtn");
+  const status = document.getElementById("gamesSearchStatus");
+  const gamesList = document.getElementById("gamesList");
+  if (!dateInput || !searchButton || !status || !gamesList) return;
+
+  function setStatus(text) { status.textContent = text; }
 
   function today() {
     const d = new Date();
-    const yyyy = d.getFullYear();
-    const mm = String(d.getMonth() + 1).padStart(2, "0");
-    const dd = String(d.getDate()).padStart(2, "0");
-    return `${yyyy}-${mm}-${dd}`;
+    return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
   }
 
   function getGames(data) {
@@ -27,70 +97,48 @@
     return [];
   }
 
-  function clearGames() {
-    const gamesList = document.getElementById("gamesList");
-    if (gamesList) gamesList.innerHTML = "";
-  }
+  function clearGames() { gamesList.innerHTML = ""; }
 
   function renderGames(games) {
-    const gamesList = document.getElementById("gamesList");
-    if (!gamesList) return;
     gamesList.innerHTML = "";
-    for (const game of games) {
-      const id = game.id || game.fixture_id;
-      if (!id) continue;
-      const name = game.name || `${game.home?.name || "?"} vs ${game.away?.name || "?"}`;
+    (games || []).forEach(game => {
+      const fixtureId = game?.fixture_id ?? game?.fixtureId ?? game?.fixture?.id ?? game?.id;
+      const provider = String(game?.provider || "auto").toLowerCase();
+      const name = game.name || ((game.home?.name || "?") + " vs " + (game.away?.name || "?"));
       const league = game.league?.name || "";
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "game-item";
-      btn.textContent = league ? `${name} · ${league}` : name;
-      const date = String(game.starting_at || game.date || "").slice(0, 10);
-      const home = game.home?.name || "";
-      const away = game.away?.name || "";
-      const key = String(id);
-      fixtureContexts[key] = { date, home, away, sportsItem: game };
-      btn.addEventListener("click", () => {
-        window.dispatchEvent(
-          new CustomEvent("greenEngineFixtureSelected", {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "game-item";
+      item.textContent = league ? name + " · " + league : name;
+      item.dataset.fixtureId = fixtureId != null ? String(fixtureId) : "";
+      item.dataset.provider = provider;
+      if (fixtureId != null) {
+        const key = String(fixtureId);
+        const date = String(game.starting_at || game.date || "").slice(0, 10);
+        fixtureContexts[key] = {
+          date,
+          home: game.home?.name || "",
+          away: game.away?.name || "",
+          provider,
+          sportsItem: game
+        };
+        item.addEventListener("click", () => {
+          window.dispatchEvent(new CustomEvent("greenEngineFixtureSelected", {
             detail: {
-              id: key,
-              provider: game.provider || "auto",
+              id: fixtureId,
+              provider,
+              league: game?.league || null,
+              source: game,
               context: fixtureContexts[key]
             }
-          })
-        );
-      });
-      gamesList.appendChild(btn);
-    }
-  }
-
-  const dateInput = document.getElementById("gameDate");
-  const searchButton = document.getElementById("searchGamesBtn");
-  const status = document.getElementById("gamesSearchStatus");
-  const gamesList = document.getElementById("gamesList");
-  if (!dateInput || !searchButton || !status || !gamesList) return;
-
-  function setStatus(text) {
-    status.textContent = text;
-  }
-
-  // Redirect absolute API calls to same-origin when on workers.dev; inject context into fixture/history
-  window.fetch = function (input, init) {
-    try {
-      let url = typeof input === "string" ? input : input?.url;
-      if (typeof url === "string" && url.startsWith("/api/")) {
-        // keep relative
-      } else if (typeof url === "string" && /green-engine-v6-3-1[56]-cf\.gerenteheliton\.workers\.dev/i.test(url)) {
-        const u = new URL(url);
-        url = u.pathname + u.search;
-        input = url;
+          }));
+        });
+      } else {
+        item.disabled = true;
       }
-    } catch (error) {
-      console.warn("[Green Engine] Redirecionamento da API falhou:", error);
-    }
-    return originalFetch(input, init);
-  };
+      gamesList.appendChild(item);
+    });
+  }
 
   async function loadGamesByDate() {
     const selectedDate = dateInput.value || today();
@@ -118,8 +166,8 @@
         if (rateLimited) {
           setStatus(
             fd.configured
-              ? "API-Football no limite. Fallback football-data ativo, mas sem jogos nas 12 ligas free nesta data. Tente outra data (ex.: 20/09) ou aguarde a cota."
-              : "API-Football no limite de requisições. Aguarde alguns minutos ou configure FOOTBALL_DATA_API_KEY para fallback."
+              ? "API-Football no limite. Fallback ativo, mas sem jogos nas 12 ligas free nesta data. Tente outra data (ex.: 20/09) ou aguarde a cota."
+              : "API-Football no limite de requisições. Aguarde alguns minutos."
           );
           clearGames();
           return;
@@ -130,20 +178,20 @@
       const mode = String(data?.providerMode || "");
       const viaFallback = /fallback|football-data/i.test(mode);
       if (viaFallback) {
-        setStatus(`${games.length} jogo(s) via fallback (football-data) — API-Football no limite.`);
+        setStatus(games.length + " jogo(s) via fallback (football-data) — API-Football no limite.");
       } else if (af.rateLimited && games.length) {
-        setStatus(`${games.length} jogo(s) (parcial/fallback). API-Football reportou limite.`);
+        setStatus(games.length + " jogo(s) (com fallback). API-Football reportou limite.");
       } else {
-        setStatus(`${games.length} jogo(s) encontrado(s).`);
+        setStatus(games.length + " jogo(s) encontrado(s).");
       }
       renderGames(games);
     } catch (error) {
       console.error("[Green Engine] Erro na pesquisa:", error);
       const msg = error?.message || "erro de conexao";
       if (/limite|rate\s*limit|too many|429/i.test(msg)) {
-        setStatus("API-Football no limite — tente de novo em instantes ou outra data com ligas free (BR/EU).");
+        setStatus("API-Football no limite — tente outra data com ligas free (BR/EU) ou aguarde a cota.");
       } else {
-        setStatus(`Não foi possível carregar os jogos: ${msg}`);
+        setStatus("Não foi possível carregar os jogos: " + msg);
       }
       clearGames();
     }
