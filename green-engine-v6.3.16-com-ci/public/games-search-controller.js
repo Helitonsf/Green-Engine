@@ -1,81 +1,69 @@
-(function () {
-  "use strict";
+(() => {
+  const API_BASE = (() => {
+    try {
+      if (typeof window !== "undefined" && window.location && /workers\.dev$/i.test(window.location.hostname)) {
+        return "";
+      }
+    } catch (_) {}
+    return "https://green-engine-v6-3-15-cf.gerenteheliton.workers.dev";
+  })();
 
-  // Same-origin no Worker e em localhost; Pages usa o Worker v6-3-15 (com API_FOOTBALL_KEY).
-  const API_BASE = (typeof location !== "undefined" && (
-    /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ||
-    /\.workers\.dev$/.test(location.hostname)
-  ))
-    ? ""
-    : "https://green-engine-v6-3-15-cf.gerenteheliton.workers.dev";
   const originalFetch = window.fetch.bind(window);
-  const fixtureContexts = window.greenEngineFixtureContexts = window.greenEngineFixtureContexts || {};
+  const fixtureContexts = {};
+  window.greenEngineFixtureContexts = fixtureContexts;
 
-  function getContextForId(id) {
-    return fixtureContexts[String(id)] || null;
+  function today() {
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd}`;
   }
 
-  function withFixtureContext(url) {
-    try {
-      const parsed = new URL(url, window.location.href);
-      if (!parsed.pathname.startsWith("/api/")) return url;
-
-      if (parsed.pathname === "/api/fixture") {
-        const id = parsed.searchParams.get("id");
-        const context = getContextForId(id);
-        if (context) {
-          if (context.date) parsed.searchParams.set("date", context.date);
-          if (context.home) parsed.searchParams.set("home", context.home);
-          if (context.away) parsed.searchParams.set("away", context.away);
-        }
-      }
-
-      if (parsed.pathname === "/api/history") {
-        const requestedId = parsed.searchParams.get("fixture");
-        const context = getContextForId(requestedId);
-        if (context) {
-          if (context.resolvedId) {
-            parsed.searchParams.set("fixture", context.resolvedId);
-          }
-          if (context.date) parsed.searchParams.set("date", context.date);
-          if (context.home) parsed.searchParams.set("home", context.home);
-          if (context.away) parsed.searchParams.set("away", context.away);
-        }
-      }
-
-      return parsed.toString();
-    } catch (error) {
-      console.warn("[Green Engine] Contexto de fixture nao aplicado:", error);
-      return url;
-    }
+  function getGames(data) {
+    if (Array.isArray(data?.data)) return data.data;
+    if (Array.isArray(data?.games)) return data.games;
+    if (Array.isArray(data?.response)) return data.response;
+    return [];
   }
 
-  window.fetch = function (input, init) {
-    try {
-      const rawUrl = typeof input === "string" ? input : input?.url || "";
-      if (rawUrl.startsWith("/api/")) {
-        const target = withFixtureContext(API_BASE + rawUrl);
-        const parsedTarget = new URL(target);
+  function clearGames() {
+    const gamesList = document.getElementById("gamesList");
+    if (gamesList) gamesList.innerHTML = "";
+  }
 
-        return originalFetch(target, init).then(response => {
-          if (parsedTarget.pathname === "/api/fixture" && response.ok) {
-            response.clone().json().then(payload => {
-              const requestedId = parsedTarget.searchParams.get("id");
-              const resolvedId = payload?.data?.id ?? payload?.data?.fixture_id ?? null;
-              if (requestedId && resolvedId != null) {
-                const context = getContextForId(requestedId);
-                if (context) context.resolvedId = String(resolvedId);
-              }
-            }).catch(() => {});
-          }
-          return response;
-        });
-      }
-    } catch (error) {
-      console.warn("[Green Engine] Redirecionamento da API falhou:", error);
+  function renderGames(games) {
+    const gamesList = document.getElementById("gamesList");
+    if (!gamesList) return;
+    gamesList.innerHTML = "";
+    for (const game of games) {
+      const id = game.id || game.fixture_id;
+      if (!id) continue;
+      const name = game.name || `${game.home?.name || "?"} vs ${game.away?.name || "?"}`;
+      const league = game.league?.name || "";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "game-item";
+      btn.textContent = league ? `${name} · ${league}` : name;
+      const date = String(game.starting_at || game.date || "").slice(0, 10);
+      const home = game.home?.name || "";
+      const away = game.away?.name || "";
+      const key = String(id);
+      fixtureContexts[key] = { date, home, away, sportsItem: game };
+      btn.addEventListener("click", () => {
+        window.dispatchEvent(
+          new CustomEvent("greenEngineFixtureSelected", {
+            detail: {
+              id: key,
+              provider: game.provider || "auto",
+              context: fixtureContexts[key]
+            }
+          })
+        );
+      });
+      gamesList.appendChild(btn);
     }
-    return originalFetch(input, init);
-  };
+  }
 
   const dateInput = document.getElementById("gameDate");
   const searchButton = document.getElementById("searchGamesBtn");
@@ -83,87 +71,31 @@
   const gamesList = document.getElementById("gamesList");
   if (!dateInput || !searchButton || !status || !gamesList) return;
 
-  const today = () => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  };
-
-  function setStatus(text) { status.textContent = text; }
-  function clearGames() { gamesList.innerHTML = ""; }
-
-  function getGames(data) {
-    if (Array.isArray(data)) return data;
-    if (Array.isArray(data?.data)) return data.data;
-    if (Array.isArray(data?.fixtures)) return data.fixtures;
-    if (Array.isArray(data?.results)) return data.results;
-    return [];
+  function setStatus(text) {
+    status.textContent = text;
   }
 
-  function getParticipantByLocation(game, location) {
-    const participants = Array.isArray(game?.participants) ? game.participants : [];
-    return participants.find(p => String(p?.meta?.location || "").toLowerCase() === location) || null;
-  }
-
-  function renderGames(games) {
-    clearGames();
-    if (!games.length) {
-      setStatus("Nenhum jogo encontrado para esta data.");
-      return;
-    }
-
-    setStatus(`${games.length} jogo(s) encontrado(s).`);
-    games.forEach(game => {
-      const fixtureId = game?.fixture_id ?? game?.fixtureId ?? game?.fixture?.id ?? game?.id;
-      const provider = String(game?.provider || "api-football").toLowerCase();
-      const homeParticipant = getParticipantByLocation(game, "home");
-      const awayParticipant = getParticipantByLocation(game, "away");
-      const home = game?.home_team?.name ?? game?.homeTeam?.name ?? game?.home?.name ?? game?.home_name ?? homeParticipant?.name ?? game?.participants?.[0]?.name ?? "Mandante";
-      const away = game?.away_team?.name ?? game?.awayTeam?.name ?? game?.away_name ?? game?.away?.name ?? awayParticipant?.name ?? game?.participants?.[1]?.name ?? "Visitante";
-      const league = game?.league?.name ?? game?.league_name ?? game?.competition?.name ?? "Liga nao informada";
-      const date = game?.date ?? game?.starting_at ?? game?.fixture?.date ?? dateInput.value ?? today();
-
-      const item = document.createElement("button");
-      item.type = "button";
-      item.className = "game-search-item";
-      item.textContent = `${home} \u00d7 ${away} \u00b7 ${league}`;
-      item.dataset.fixtureId = fixtureId != null ? String(fixtureId) : "";
-      item.dataset.provider = provider;
-      item.style.color = "var(--text)";
-
-      if (fixtureId != null) {
-        item.addEventListener("click", () => {
-          const key = String(fixtureId);
-          fixtureContexts[key] = {
-            referenceId: key,
-            provider,
-            date: String(date).slice(0, 10),
-            home,
-            away,
-            resolvedId: null,
-            sportsItem: game
-          };
-
-          document.dispatchEvent(new CustomEvent("greenEngineFixtureSelected", {
-            detail: {
-              id: fixtureId,
-              provider,
-              league: game?.league || null,
-              source: game,
-              context: fixtureContexts[key]
-            }
-          }));
-        });
-      } else {
-        item.disabled = true;
+  // Redirect absolute API calls to same-origin when on workers.dev; inject context into fixture/history
+  window.fetch = function (input, init) {
+    try {
+      let url = typeof input === "string" ? input : input?.url;
+      if (typeof url === "string" && url.startsWith("/api/")) {
+        // keep relative
+      } else if (typeof url === "string" && /green-engine-v6-3-1[56]-cf\.gerenteheliton\.workers\.dev/i.test(url)) {
+        const u = new URL(url);
+        url = u.pathname + u.search;
+        input = url;
       }
-      gamesList.appendChild(item);
-    });
-  }
+    } catch (error) {
+      console.warn("[Green Engine] Redirecionamento da API falhou:", error);
+    }
+    return originalFetch(input, init);
+  };
 
   async function loadGamesByDate() {
     const selectedDate = dateInput.value || today();
     dateInput.value = selectedDate;
-    setStatus("Pesquisando jogos...");
+    setStatus("Pesquisando jogos (API-Football → fallback se necessário)…");
     clearGames();
 
     try {
@@ -173,14 +105,46 @@
       });
       const data = await response.json().catch(() => ({}));
       window.greenEngineGamesSearch = { date: selectedDate, response: data };
+      const sources = data?.sources || {};
+      const af = sources.apiFootball || {};
+      const fd = sources.footballData || {};
+      const games = getGames(data);
+
       if (!response.ok) {
-        const message = data?.error || `HTTP ${response.status}`;
-        throw new Error(message);
+        const rateLimited =
+          response.status === 429 ||
+          af.rateLimited ||
+          /limite|rate\s*limit|too many/i.test(String(data?.error || ""));
+        if (rateLimited) {
+          setStatus(
+            fd.configured
+              ? "API-Football no limite. Fallback football-data ativo, mas sem jogos nas 12 ligas free nesta data. Tente outra data (ex.: 20/09) ou aguarde a cota."
+              : "API-Football no limite de requisições. Aguarde alguns minutos ou configure FOOTBALL_DATA_API_KEY para fallback."
+          );
+          clearGames();
+          return;
+        }
+        throw new Error(data?.error || `HTTP ${response.status}`);
       }
-      renderGames(getGames(data));
+
+      const mode = String(data?.providerMode || "");
+      const viaFallback = /fallback|football-data/i.test(mode);
+      if (viaFallback) {
+        setStatus(`${games.length} jogo(s) via fallback (football-data) — API-Football no limite.`);
+      } else if (af.rateLimited && games.length) {
+        setStatus(`${games.length} jogo(s) (parcial/fallback). API-Football reportou limite.`);
+      } else {
+        setStatus(`${games.length} jogo(s) encontrado(s).`);
+      }
+      renderGames(games);
     } catch (error) {
       console.error("[Green Engine] Erro na pesquisa:", error);
-      setStatus(`Nao foi possivel carregar os jogos: ${error?.message || "erro de conexao"}`);
+      const msg = error?.message || "erro de conexao";
+      if (/limite|rate\s*limit|too many|429/i.test(msg)) {
+        setStatus("API-Football no limite — tente de novo em instantes ou outra data com ligas free (BR/EU).");
+      } else {
+        setStatus(`Não foi possível carregar os jogos: ${msg}`);
+      }
       clearGames();
     }
   }
