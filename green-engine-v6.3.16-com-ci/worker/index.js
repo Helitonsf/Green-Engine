@@ -1,14 +1,18 @@
 /**
- * Green Engine worker — football-data.org only (API-Football removed).
- * Odds desativadas nesta versão.
+ * Green Engine worker — football-data.org (dados) + The Odds API (odds opcional).
+ * API-Football removida.
  */
 import { footballDataConfigured, footballDataSports, footballDataFixture } from "../cloudflare/providers/football-data.js";
 import { footballDataHistory } from "../cloudflare/providers/football-data-history.js";
+import {
+  theOddsApiConfigured,
+  theOddsApiOdds,
+  enrichMarketsWithOdds
+} from "../cloudflare/providers/the-odds-api.js";
 
 const JSON_HEADERS = { "Content-Type": "application/json; charset=utf-8" };
 const CACHE_TTL = { sports: 120, leagues: 3600, markets: 86400, fixture: 60, history: 300 };
 
-/** Statuses de partida já encerrada (não listar como pré-jogo). */
 const FINISHED_SHORT = new Set([
   "FT", "AET", "PEN", "PST", "CANC", "ABD", "AWD", "WO", "FINISHED", "MATCH FINISHED"
 ]);
@@ -89,7 +93,6 @@ async function sports(url, env) {
   if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     return json({ error: "Data invalida. Use AAAA-MM-DD." }, 400);
   }
-
   if (!footballDataConfigured(env)) {
     return json({
       error: "FOOTBALL_DATA_API_KEY nao esta configurada no Cloudflare.",
@@ -97,7 +100,6 @@ async function sports(url, env) {
       sources: { footballData: { configured: false } }
     }, 500);
   }
-
   const fd = await footballDataSports(date, env);
   const sources = {
     footballData: fd.diagnostic || {
@@ -106,16 +108,12 @@ async function sports(url, env) {
       rateLimited: Boolean(fd.rateLimited)
     }
   };
-
   let data = Array.isArray(fd.data) ? fd.data.slice() : [];
   const includeFinished = ["1", "true", "yes"].includes(
     String(url.searchParams.get("includeFinished") || "").toLowerCase()
   );
   const beforeFilter = data.length;
-  if (!includeFinished) {
-    data = data.filter(g => !isFixtureFinished(g));
-  }
-
+  if (!includeFinished) data = data.filter(g => !isFixtureFinished(g));
   if (fd.rateLimited) {
     return json({
       error: "Limite de requisicoes do football-data.org atingido. Aguarde e tente de novo.",
@@ -124,7 +122,6 @@ async function sports(url, env) {
       meta: { total: 0, beforeFilter, excludedFinished: !includeFinished, date }
     }, 429);
   }
-
   if (!data.length) {
     return json({
       error: beforeFilter > 0
@@ -135,7 +132,6 @@ async function sports(url, env) {
       meta: { total: 0, beforeFilter, excludedFinished: !includeFinished, date, leagues: "free-12" }
     }, 404);
   }
-
   return json({
     providerMode: "football-data",
     data,
@@ -181,40 +177,27 @@ async function markets(_env) {
     data: [],
     availableBetTypeCount: 0,
     source: "none",
-    note: "Odds e catalogo de apostas desativados (API-Football removida).",
+    note: "Odds via The Odds API no /api/history (se THE_ODDS_API_KEY configurada).",
     greenEngine: {
-      implementedStatisticalFamilies: [
-        "goals",
-        "both-teams-to-score",
-        "home-away-double-chance (+0.5)"
-      ],
+      implementedStatisticalFamilies: ["goals", "both-teams-to-score", "home-away-double-chance (+0.5)"],
       candidateStatisticalFamilies: ["corners", "yellow-cards", "shots"],
       oddsInfluence: false,
-      recommendationThresholds: {
-        confidenceScoreMin: 70,
-        probabilityMin: 0.7,
-        scoreGapMin: 3
-      }
+      recommendationThresholds: { confidenceScoreMin: 70, probabilityMin: 0.7, scoreGapMin: 3 }
     }
   }, 200);
 }
 
 async function fixture(url, env) {
   const id = url.searchParams.get("id");
-  if (!id || !/^\d+$/.test(id)) {
-    return json({ error: "Informe um fixture ID numerico." }, 400);
-  }
-
+  if (!id || !/^\d+$/.test(id)) return json({ error: "Informe um fixture ID numerico." }, 400);
   if (!footballDataConfigured(env)) {
     return json({ error: "FOOTBALL_DATA_API_KEY nao esta configurada no Cloudflare." }, 500);
   }
-
   const context = {
     date: url.searchParams.get("date") || "",
     home: url.searchParams.get("home") || "",
     away: url.searchParams.get("away") || ""
   };
-
   const fd = await footballDataFixture(id, env, context);
   if (fd?.__rateLimited) {
     return json({
@@ -223,15 +206,62 @@ async function fixture(url, env) {
       diagnostic: { stage: fd.stage || "fixture" }
     }, 429);
   }
-  if (fd) {
-    return json({ provider: "football-data", data: fd }, 200);
-  }
-
+  if (fd) return json({ provider: "football-data", data: fd }, 200);
   return json({
-    error:
-      "Fixture nao encontrado no football-data.org. Use ID de uma das 12 ligas free ou envie date+home+away.",
+    error: "Fixture nao encontrado no football-data.org. Use ID de uma das 12 ligas free ou envie date+home+away.",
     diagnostic: { requestedId: id, context }
   }, 404);
+}
+
+async function attachOddsIfPossible(body, env) {
+  try {
+    if (!body?.ok || !body?.greenScore) return body;
+    if (!theOddsApiConfigured(env)) {
+      body.diagnostic = {
+        ...(body.diagnostic || {}),
+        odds: "not-configured",
+        oddsNote: "Defina THE_ODDS_API_KEY no Cloudflare para ativar odds."
+      };
+      if (body.greenScore) {
+        body.greenScore = { ...body.greenScore, oddsInfluence: false, oddsSource: null };
+      }
+      return body;
+    }
+    const oddsResult = await theOddsApiOdds(body.fixture, env);
+    if (oddsResult.rateLimited) {
+      body.diagnostic = {
+        ...(body.diagnostic || {}),
+        odds: "rate-limited",
+        oddsDiagnostic: oddsResult.diagnostic || null
+      };
+      return body;
+    }
+    if (!oddsResult.ok || !oddsResult.odds) {
+      body.diagnostic = {
+        ...(body.diagnostic || {}),
+        odds: oddsResult.error || "unavailable",
+        oddsDiagnostic: oddsResult.diagnostic || null
+      };
+      return body;
+    }
+    const { greenScore, oddsAttached, matched } = enrichMarketsWithOdds(body.greenScore, oddsResult.odds);
+    body.greenScore = greenScore;
+    body.diagnostic = {
+      ...(body.diagnostic || {}),
+      odds: oddsAttached ? "attached" : "no-match",
+      oddsMatched: matched,
+      oddsBookmaker: oddsResult.odds.bookmaker?.name || null,
+      oddsProvider: "the-odds-api",
+      oddsRemaining: oddsResult.odds.remaining ?? null
+    };
+  } catch (e) {
+    body.diagnostic = {
+      ...(body.diagnostic || {}),
+      odds: "error",
+      oddsError: String(e?.message || e)
+    };
+  }
+  return body;
 }
 
 async function history(url, env) {
@@ -239,30 +269,24 @@ async function history(url, env) {
   if (!fixtureId || !/^\d+$/.test(fixtureId)) {
     return json({ error: "Informe um fixture ID numerico." }, 400);
   }
-
   if (!footballDataConfigured(env)) {
     return json({ error: "FOOTBALL_DATA_API_KEY nao esta configurada no Cloudflare." }, 500);
   }
-
   const context = {
     date: url.searchParams.get("date") || "",
     home: url.searchParams.get("home") || "",
     away: url.searchParams.get("away") || ""
   };
-
   const result = await footballDataHistory(fixtureId, env, context);
-  const body = result.body || { ok: false, error: "Falha no historico" };
-  if (body.greenScore) {
-    body.greenScore = {
-      ...body.greenScore,
-      oddsInfluence: false,
-      oddsSource: null
-    };
+  let body = result.body || { ok: false, error: "Falha no historico" };
+  if (result.statusCode === 200 && body.ok) {
+    body = await attachOddsIfPossible(body, env);
+  } else if (body.greenScore) {
+    body.greenScore = { ...body.greenScore, oddsInfluence: false, oddsSource: null };
   }
   body.diagnostic = {
     ...(body.diagnostic || {}),
     provider: "football-data",
-    odds: "disabled",
     apiFootball: "removed"
   };
   return json(body, result.statusCode || 500);
@@ -278,12 +302,9 @@ export default {
         return Response.redirect(target.toString(), 302);
       }
     } catch (_) {}
-
     if (request.method === "OPTIONS") return cors(request, json({ ok: true }), env);
-
     const url = new URL(request.url);
     let response;
-
     if (url.pathname === "/api/sports") {
       response = await withCache(request, ctx, CACHE_TTL.sports, () => sports(url, env));
     } else if (url.pathname === "/api/leagues") {
@@ -302,19 +323,21 @@ export default {
         leagueFilter: "football-data-free-12",
         providers: {
           footballData: footballDataConfigured(env),
-          apiFootball: false
+          apiFootball: false,
+          theOddsApi: theOddsApiConfigured(env)
         },
         providerMode: "football-data-only",
         priority: "football-data",
-        odds: "disabled",
-        note: "API-Football removida do projeto (rate-limit free)."
+        odds: theOddsApiConfigured(env)
+          ? "the-odds-api (best-effort on /api/history)"
+          : "disabled (set THE_ODDS_API_KEY)",
+        note: "API-Football removida. Odds via The Odds API (opcional)."
       }, 200);
     } else if (env.ASSETS) {
       return env.ASSETS.fetch(request);
     } else {
       response = json({ error: "Rota nao encontrada." }, 404);
     }
-
     return cors(request, response, env);
   }
 };
