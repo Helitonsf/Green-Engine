@@ -42,22 +42,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Force provider default api-football in public UI
+      - name: Force provider default auto in public UI
         run: |
           python3 - <<'PY'
           from pathlib import Path
           p = Path("public/index.html")
           if p.exists():
             t = p.read_text(encoding="utf-8")
-            t2 = t.replace('provider = "sportmonks"', 'provider = "api-football"').replace('|| "sportmonks"', '|| "api-football"')
-            if t2 != t:
-              p.write_text(t2, encoding="utf-8")
-              print("public/index.html: sportmonks defaults -> api-football")
-            else:
-              print("public/index.html: already api-football or no sportmonks defaults")
+            t2 = t.replace('provider = "sportmonks"', 'provider = "auto"').replace('|| "sportmonks"', '|| "auto"').replace('provider = "api-football"', 'provider = "auto"').replace('|| "api-football"', '|| "auto"')
+            p.write_text(t2, encoding="utf-8")
+            print("patched" if t2 != t else "no change")
           PY
 
-      - name: Apply UI redesign + history-lazy patches
+      - name: Apply UI redesign + history-lazy + odds patches
         run: python3 scripts/apply-ui-redesign.py
 
       - name: Validate Worker syntax
@@ -66,6 +63,7 @@ jobs:
           node --check cloudflare/kv-cache.js &&
           node --check cloudflare/providers/api-football.js &&
           node --check cloudflare/providers/api-football-history.js &&
+          node --check cloudflare/providers/api-football-odds.js &&
           node --check cloudflare/providers/team-history.js &&
           node --check cloudflare/providers/league-catalog.js &&
           node --check cloudflare/providers/football-data.js &&
@@ -95,19 +93,19 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Force provider default api-football in public UI
+      - name: Force provider default auto in public UI
         run: |
           python3 - <<'PY'
           from pathlib import Path
           p = Path("public/index.html")
           if p.exists():
             t = p.read_text(encoding="utf-8")
-            t2 = t.replace('provider = "sportmonks"', 'provider = "api-football"').replace('|| "sportmonks"', '|| "api-football"')
+            t2 = t.replace('provider = "sportmonks"', 'provider = "auto"').replace('|| "sportmonks"', '|| "auto"').replace('provider = "api-football"', 'provider = "auto"').replace('|| "api-football"', '|| "auto"')
             p.write_text(t2, encoding="utf-8")
             print("patched" if t2 != t else "no change")
           PY
 
-      - name: Apply UI redesign + history-lazy patches
+      - name: Apply UI redesign + history-lazy + odds patches
         run: python3 scripts/apply-ui-redesign.py
 
       - name: Ensure HISTORY_KV namespace

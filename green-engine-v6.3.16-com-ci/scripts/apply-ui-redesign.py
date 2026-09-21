@@ -1,200 +1,87 @@
 #!/usr/bin/env python3
-"""Apply UI redesign + fixture free-plan patches to public/index.html before deploy."""
+"""Apply UI redesign + history-lazy + odds column patches to public/index.html in CI."""
 from pathlib import Path
 
 p = Path("public/index.html")
+if not p.exists():
+    print("public/index.html missing")
+    raise SystemExit(0)
+
 html = p.read_text(encoding="utf-8")
 
-if "ui-redesign.css" not in html:
-    html = html.replace("</head>", '  <link rel="stylesheet" href="ui-redesign.css">\n</head>', 1)
-    print("linked ui-redesign.css")
+# Provider defaults
+html = html.replace('provider = "sportmonks"', 'provider = "auto"')
+html = html.replace('|| "sportmonks"', '|| "auto"')
+html = html.replace('provider = "api-football"', 'provider = "auto"')
+html = html.replace('|| "api-football"', '|| "auto"')
 
-old_search = (
-    '    <div class="panel">\n'
-    '      <h3>Buscar jogo</h3>\n'
-    '      <div class="search-row-inline">\n'
-    '        <input id="quickFilterInput" type="text" placeholder="Filtrar por nome do time…" autocomplete="off">\n'
-    '        <button type="button" class="icon-btn" id="quickFilterClear" title="Limpar filtro" aria-label="Limpar filtro">\n'
-    '          <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>\n'
-    '        </button>\n'
-    '      </div>\n'
-    '    </div>\n'
-    '\n'
-    '    <div class="panel">\n'
-    '      <h3>Filtros</h3>\n'
-    '\n'
-    '      <div class="field">\n'
-    '        <label for="gameDate">Data</label>\n'
-    '        <input id="gameDate" type="date">\n'
-    '      </div>\n'
-    '\n'
-    '      <button type="button" id="searchGamesBtn" class="block">Pesquisar jogos</button>\n'
-    '\n'
-    '      <div id="gamesSearchStatus" class="muted small" style="margin-top:12px;" role="status" aria-live="polite">\n'
-    '        Selecione uma data para pesquisar os jogos disponíveis.\n'
-    '      </div>\n'
-    '\n'
-    '      <div id="gamesList" class="games-list"></div>\n'
-    '    </div>'
+# Odds columns in markets table
+_old_odds_row = """    return `
+      <tr>
+        <td class=\"market-name\">${escapeHtml(m.market)}</td>
+        <td>${pct(m.probability)}</td>
+        <td class=\"muted\">—</td>
+        <td>${oddJusta}</td>
+        <td class=\"muted\">—</td>
+        <td class=\"muted\">—</td>
+        <td><span class=\"badge-pill ${confidenceBadgeClass(confidenceLabel)}\">${escapeHtml(String(confidenceLabel).toUpperCase())}</span></td>
+        <td>${recBadge}</td>
+      </tr>
+    `;"""
+_new_odds_row = """    const implied = Number(m.impliedProbability);
+    const oddAtual = Number(m.odd);
+    const valueEdge = Number(m.valueEdge);
+    const impliedCell = Number.isFinite(implied)
+      ? pct(implied)
+      : '<span class=\"muted\">—</span>';
+    const oddAtualCell = Number.isFinite(oddAtual)
+      ? oddAtual.toFixed(2)
+      : '<span class=\"muted\">—</span>';
+    let valueCell = '<span class=\"muted\">—</span>';
+    if (Number.isFinite(valueEdge)) {
+      const cls = valueEdge > 0.05 ? 'badge-apostar' : valueEdge < -0.05 ? 'badge-evitar' : 'badge-neutro';
+      valueCell = `<span class=\"badge-pill ${cls}\">${(valueEdge * 100).toFixed(1)}%</span>`;
+    }
+
+    return `
+      <tr>
+        <td class=\"market-name\">${escapeHtml(m.market)}</td>
+        <td>${pct(m.probability)}</td>
+        <td>${impliedCell}</td>
+        <td>${oddJusta}</td>
+        <td>${oddAtualCell}</td>
+        <td>${valueCell}</td>
+        <td><span class=\"badge-pill ${confidenceBadgeClass(confidenceLabel)}\">${escapeHtml(String(confidenceLabel).toUpperCase())}</span></td>
+        <td>${recBadge}</td>
+      </tr>
+    `;"""
+if _old_odds_row in html:
+    html = html.replace(_old_odds_row, _new_odds_row, 1)
+    print("odds columns patched in markets table")
+html = html.replace(
+    "Prob. Implícita, Odd Atual e Valor dependem de uma fonte de odds — ainda não conectada nesta versão.",
+    "Prob. Implícita, Odd Atual e Valor vêm da API-Football /odds (quando disponível para o fixture). Valor = Prob.Modelo × Odd − 1.",
 )
-new_search = (
-    '    <div class="panel">\n'
-    '      <h3>\n'
-    '        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3-3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>\n'
-    '        Pesquisa\n'
-    '      </h3>\n'
-    '\n'
-    '      <div class="field">\n'
-    '        <label for="gameDate">Data</label>\n'
-    '        <input id="gameDate" type="date">\n'
-    '      </div>\n'
-    '\n'
-    '      <button type="button" id="searchGamesBtn" class="block">Pesquisar jogos</button>\n'
-    '\n'
-    '      <div class="field" style="margin-top:14px;">\n'
-    '        <label for="quickFilterInput">Filtrar por time</label>\n'
-    '        <div class="search-row-inline">\n'
-    '          <input id="quickFilterInput" type="text" placeholder="Ex.: Palmeiras, Flamengo…" autocomplete="off">\n'
-    '          <button type="button" class="icon-btn" id="quickFilterClear" title="Limpar filtro" aria-label="Limpar filtro">\n'
-    '            <svg width="16" height="16" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>\n'
-    '          </button>\n'
-    '        </div>\n'
-    '      </div>\n'
-    '\n'
-    '      <div id="gamesSearchStatus" class="muted small" style="margin-top:12px;" role="status" aria-live="polite">\n'
-    '        Selecione uma data para pesquisar os jogos disponíveis.\n'
-    '      </div>\n'
-    '\n'
-    '      <div id="gamesList" class="games-list"></div>\n'
-    '    </div>'
-)
-if old_search in html:
-    html = html.replace(old_search, new_search, 1)
-    print("unified search panel")
 
-html = html.replace('<div class="card-eyebrow">Mercado recomendado</div>', '<div class="card-eyebrow">★ Mercado recomendado</div>', 1)
-html = html.replace('<h3>Resumo da análise</h3>', '<h3>Resumo</h3>', 1)
-html = html.replace('<h3>Confidence score</h3>', '<h3>Confidence Score</h3>', 1)
-
-if "Confrontação" not in html:
-    html = html.replace(
-        '      <div class="card fixture-card">\n        <div class="fixture-teams">',
-        '      <div class="card fixture-card">\n        <h3 style="margin-bottom:4px;">Confrontação</h3>\n        <div class="fixture-teams">',
-        1,
-    )
-
-old_gauge = (
-    '      <div class="gauge-wrap">\n'
-    '        <svg viewBox="0 0 120 120">\n'
-    '          <circle class="gauge-track" cx="60" cy="60" r="50"></circle>\n'
-    '          <circle class="gauge-value" id="gaugeCircle" cx="60" cy="60" r="50"\n'
-    '            stroke-dasharray="0 314"></circle>\n'
-    '        </svg>'
-)
-new_gauge = (
-    '      <div class="gauge-wrap">\n'
-    '        <svg viewBox="0 0 120 120">\n'
-    '          <defs>\n'
-    '            <linearGradient id="gaugeGradient" x1="0%" y1="0%" x2="100%" y2="0%">\n'
-    '              <stop offset="0%" stop-color="#22c55e"/>\n'
-    '              <stop offset="70%" stop-color="#4ade80"/>\n'
-    '              <stop offset="100%" stop-color="#f4c95d"/>\n'
-    '            </linearGradient>\n'
-    '          </defs>\n'
-    '          <circle class="gauge-track" cx="60" cy="60" r="50"></circle>\n'
-    '          <circle class="gauge-value" id="gaugeCircle" cx="60" cy="60" r="50"\n'
-    '            stroke-dasharray="0 314"></circle>\n'
-    '        </svg>'
-)
-if old_gauge in html:
-    html = html.replace(old_gauge, new_gauge, 1)
-
-if "sportsItem" not in html:
-    new_lf = '''async function loadFixture(id, provider = "api-football", context = {}){
-  const cached = context?.sportsItem || window.greenEngineFixtureContexts?.[String(id)]?.sportsItem;
-  if (cached && (cached.id || cached.fixture_id)) {
-    setApiStatus(true);
-    const fixture = cached;
-    const homeGuess = fixture.home?.name || String(fixture.name || "").split(/\\s+vs\\s+/i)[0] || "—";
-    const awayGuess = fixture.away?.name || (String(fixture.name || "").split(/\\s+vs\\s+/i)[1] || "—");
-    $("fixtureHomeName").textContent = homeGuess;
-    $("fixtureAwayName").textContent = awayGuess;
-    $("homeCrest").textContent = initials(homeGuess);
-    $("awayCrest").textContent = initials(awayGuess);
-    $("summaryGame").textContent = fixture.name || (`${homeGuess} vs ${awayGuess}`);
-    $("summaryLeague").textContent = fixture.league?.name || "—";
-    const rawDate = fixture.starting_at || fixture.date;
-    let fixtureDateBR = "—";
-    if (rawDate) { try { fixtureDateBR = new Date(String(rawDate)).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }); } catch { fixtureDateBR = String(rawDate).slice(0, 16); } }
-    $("summaryDate").textContent = fixtureDateBR;
-    $("fixtureMeta").textContent = [fixture.league?.name, fixtureDateBR].filter(Boolean).join(" · ");
-    return fixture;
-  }
-  const qs = new URLSearchParams({ id: String(id), provider: String(provider) });
-  if (context?.date) qs.set("date", String(context.date).slice(0, 10));
-  if (context?.home) qs.set("home", context.home);
-  if (context?.away) qs.set("away", context.away);
-  const response = await fetch("/api/fixture?" + qs.toString());'''
-
-    for default_provider in ("sportmonks", "api-football"):
-        old_lf = (
-            f'async function loadFixture(id, provider = "{default_provider}"){{\n'
-            '  const response = await fetch("/api/fixture?id=" + encodeURIComponent(id) + "&provider=" + encodeURIComponent(provider));'
-        )
-        if old_lf in html:
-            html = html.replace(old_lf, new_lf, 1)
-            print("loadFixture patched from", default_provider)
-            break
-
-    new_lh = '''async function loadHistory(id, provider = "api-football", context = {}){
-  const qs = new URLSearchParams({ fixture: String(id), provider: String(provider) });
-  if (context?.date) qs.set("date", String(context.date).slice(0, 10));
-  if (context?.home) qs.set("home", context.home);
-  if (context?.away) qs.set("away", context.away);
-  const response = await fetch("/api/history?" + qs.toString());'''
-
-    for default_provider in ("sportmonks", "api-football"):
-        old_lh = (
-            f'async function loadHistory(id, provider = "{default_provider}"){{\n'
-            '  const response = await fetch("/api/history?fixture=" + encodeURIComponent(id) + "&provider=" + encodeURIComponent(provider));'
-        )
-        if old_lh in html:
-            html = html.replace(old_lh, new_lh, 1)
-            print("loadHistory patched from", default_provider)
-            break
-
-    html = html.replace(
-        '    await loadFixture(String(id), provider);\n    await loadHistory(String(id), provider);',
-        '    const context = event.detail?.context || window.greenEngineFixtureContexts?.[String(id)] || {};\n    await loadFixture(String(id), provider, context);\n    await loadHistory(String(id), provider, context);',
-    )
-    html = html.replace(
-        'const provider = String(event.detail?.provider || "sportmonks").toLowerCase();',
-        'const provider = String(event.detail?.provider || "api-football").toLowerCase();',
-    )
-    print("fixture context patches applied")
-else:
-    print("fixture context already present")
-
-# --- Pacote 1-2: history lazy + 429 retry ---
-if "CARREGANDO HISTÓRICO" not in html and "historyRetryBtn" not in html:
-    snippet_path = Path(__file__).with_name("history-lazy-handler.js.snippet")
-    if snippet_path.exists():
-        new_handler = snippet_path.read_text(encoding="utf-8").strip()
-        start = html.find('document.addEventListener("greenEngineFixtureSelected"')
-        end = html.find('/* Ordenação por coluna na tabela de mercados */', start)
-        if start != -1 and end != -1:
-            html = html[:start] + new_handler + "\n\n" + html[end:]
-            print("history-lazy handler applied")
-        else:
-            print("WARN: could not locate fixture handler block")
-    else:
-        print("WARN: history-lazy snippet missing")
-
+# loadHistory 429 status
 _old_lh = "  if(!response.ok || data.error){\n    setApiStatus(false);\n    throw new Error(data.error || \"Falha na consulta do histórico\");\n  }"
 _new_lh = "  if(!response.ok || data.error){\n    setApiStatus(false);\n    const err = new Error(data.error || \"Falha na consulta do histórico\");\n    err.status = response.status;\n    err.retryable = response.status === 429 || /limite|rate\\s*limit|too many/i.test(String(data.error || \"\"));\n    throw err;\n  }"
 if _old_lh in html and "err.status = response.status" not in html:
     html = html.replace(_old_lh, _new_lh, 1)
     print("loadHistory 429 status preserved")
+
+html = html.replace(
+    'async function loadHistory(id, provider = "api-football", context = {})',
+    'async function loadHistory(id, provider = "auto", context = {})',
+)
+html = html.replace(
+    'async function loadFixture(id, provider = "api-football", context = {})',
+    'async function loadFixture(id, provider = "auto", context = {})',
+)
+html = html.replace(
+    'const provider = String(event.detail?.provider || "api-football").toLowerCase();',
+    'const provider = String(event.detail?.provider || "auto").toLowerCase();',
+)
 
 p.write_text(html, encoding="utf-8")
 print("wrote", p.stat().st_size)
