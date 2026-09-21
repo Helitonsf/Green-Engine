@@ -7,6 +7,25 @@ import { footballDataHistory } from "../cloudflare/providers/football-data-histo
 const JSON_HEADERS = { "Content-Type": "application/json; charset=utf-8" };
 const CACHE_TTL = { sports: 120, leagues: 3600, markets: 86400, fixture: 60, history: 300 };
 
+/** Statuses de partida já encerrada (não listar como pré-jogo). */
+const FINISHED_SHORT = new Set([
+  "FT", "AET", "PEN", "PST", "CANC", "ABD", "AWD", "WO", "FINISHED", "MATCH FINISHED"
+]);
+const FINISHED_LONG = new Set([
+  "MATCH FINISHED", "FINISHED", "AFTER EXTRA TIME", "AFTER PENALTIES",
+  "POSTPONED", "CANCELLED", "ABANDONED", "TECHNICAL LOSS", "WALKOVER"
+]);
+
+function isFixtureFinished(game) {
+  if (!game) return false;
+  const status = game.status || {};
+  const short = String(status.short || status.long || game.state || "").trim().toUpperCase();
+  const long = String(status.long || game.state || "").trim().toUpperCase();
+  if (FINISHED_SHORT.has(short) || FINISHED_LONG.has(long) || FINISHED_SHORT.has(long)) return true;
+  if (["FINISHED", "AWARDED", "CANCELLED", "POSTPONED"].includes(short)) return true;
+  return false;
+}
+
 function json(body, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(body), { status, headers: { ...JSON_HEADERS, "Cache-Control": "no-store", ...extraHeaders } });
 }
@@ -116,14 +135,23 @@ async function sports(url, env) {
     sources.footballData = { configured: footballDataConfigured(env) };
   }
 
+  const includeFinished = ["1", "true", "yes"].includes(String(url.searchParams.get("includeFinished") || "").toLowerCase());
+  const beforeFilter = data.length;
+  if (!includeFinished) {
+    data = data.filter(g => !isFixtureFinished(g));
+  }
+
   if (!data.length) {
     const status = primaryRateLimited ? 429 : 404;
     return json({
       error: primaryRateLimited
         ? "API-Football no limite. Fallback football-data sem jogos nesta data (12 ligas free). Tente outra data ou aguarde a cota."
-        : "Nenhum jogo encontrado para esta data no catalogo Green Engine.",
+        : (beforeFilter > 0
+          ? "Nenhum jogo pendente/ao vivo nesta data (apenas partidas já encerradas foram encontradas)."
+          : "Nenhum jogo encontrado para esta data no catalogo Green Engine."),
       providerMode,
-      sources
+      sources,
+      meta: { total: 0, beforeFilter, excludedFinished: !includeFinished, date }
     }, status);
   }
 
@@ -131,7 +159,15 @@ async function sports(url, env) {
     providerMode,
     data,
     sources,
-    meta: { total: data.length, date, timezone: "America/Sao_Paulo", leagueFilter: "curated", provider: providerMode }
+    meta: {
+      total: data.length,
+      beforeFilter,
+      excludedFinished: !includeFinished,
+      date,
+      timezone: "America/Sao_Paulo",
+      leagueFilter: "curated",
+      provider: providerMode
+    }
   }, 200);
 }
 
