@@ -90,6 +90,15 @@
     return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0") + "-" + String(d.getDate()).padStart(2, "0");
   }
 
+  function isFixtureFinished(game) {
+    if (!game) return false;
+    const status = game.status || {};
+    const short = String(status.short || status.long || game.state || "").trim().toUpperCase();
+    const long = String(status.long || game.state || "").trim().toUpperCase();
+    const finished = new Set(["FT","AET","PEN","PST","CANC","ABD","AWD","WO","FINISHED","MATCH FINISHED","AWARDED","CANCELLED","POSTPONED"]);
+    return finished.has(short) || finished.has(long);
+  }
+
   function getGames(data) {
     if (Array.isArray(data?.data)) return data.data;
     if (Array.isArray(data?.games)) return data.games;
@@ -102,6 +111,7 @@
   function renderGames(games) {
     gamesList.innerHTML = "";
     (games || []).forEach(game => {
+      if (isFixtureFinished(game)) return;
       const fixtureId = game?.fixture_id ?? game?.fixtureId ?? game?.fixture?.id ?? game?.id;
       const provider = String(game?.provider || "auto").toLowerCase();
       const name = game.name || ((game.home?.name || "?") + " vs " + (game.away?.name || "?"));
@@ -156,7 +166,7 @@
       const sources = data?.sources || {};
       const af = sources.apiFootball || {};
       const fd = sources.footballData || {};
-      const games = getGames(data);
+      const games = getGames(data).filter(g => !isFixtureFinished(g));
 
       if (!response.ok) {
         const rateLimited =
@@ -177,12 +187,13 @@
 
       const mode = String(data?.providerMode || "");
       const viaFallback = /fallback|football-data/i.test(mode);
+      const excluded = Number(data?.meta?.beforeFilter || 0) - games.length;
       if (viaFallback) {
-        setStatus(games.length + " jogo(s) via fallback (football-data) — API-Football no limite.");
+        setStatus(games.length + " jogo(s) pendente(s)/ao vivo via fallback (football-data). Encerrados ocultos.");
       } else if (af.rateLimited && games.length) {
-        setStatus(games.length + " jogo(s) (com fallback). API-Football reportou limite.");
+        setStatus(games.length + " jogo(s) (com fallback). Encerrados ocultos.");
       } else {
-        setStatus(games.length + " jogo(s) encontrado(s).");
+        setStatus(games.length + " jogo(s) pendente(s)/ao vivo" + (excluded > 0 ? " (" + excluded + " encerrado(s) oculto(s))" : "") + ".");
       }
       renderGames(games);
     } catch (error) {
