@@ -68,6 +68,7 @@ jobs:
           node --check cloudflare/providers/league-catalog.js &&
           node --check cloudflare/providers/football-data.js &&
           node --check cloudflare/providers/football-data-history.js &&
+          node --check cloudflare/providers/the-odds-api.js &&
           node --check worker/index.js
 
       - name: Run tests
