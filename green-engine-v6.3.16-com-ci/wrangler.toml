@@ -9,13 +9,10 @@ directory = "./public"
 binding = "ASSETS"
 run_worker_first = true
 
-[secrets]
-required = ["API_FOOTBALL_KEY"]
+# FOOTBALL_DATA_API_KEY é a única fonte de dados (API-Football removida).
+# wrangler secret put FOOTBALL_DATA_API_KEY
 
 [vars]
 ALLOWED_ORIGINS = "https://helitonsf.github.io,https://green-engine-v6-3-15-cf.gerenteheliton.workers.dev,https://green-engine-v6-3-16-cf.gerenteheliton.workers.dev"
 
 # HISTORY_KV é injetado no CI por scripts/ensure-history-kv.sh antes do deploy.
-
-# Opcional (fallback free): secret FOOTBALL_DATA_API_KEY
-# wrangler secret put FOOTBALL_DATA_API_KEY
