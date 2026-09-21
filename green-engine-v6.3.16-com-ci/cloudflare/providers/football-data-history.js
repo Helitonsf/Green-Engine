@@ -8,6 +8,7 @@ import {
   footballDataConfigured,
   footballDataFixture,
   footballDataTeamMatches,
+  footballDataResolveTeamByName,
   namesLooselyMatch
 } from "./football-data.js";
 
@@ -29,46 +30,41 @@ function normalizeFinishedMatch(raw, teamId) {
   const isHome = Number(home?.id) === Number(teamId);
   const venue = isHome ? "home" : "away";
   return {
-    id: Number(raw?.id),
-    starting_at: raw?.utcDate || null,
+    id: Number(raw?.id) || null,
+    date: raw?.utcDate || null,
     name: `${home?.name || "Casa"} vs ${away?.name || "Fora"}`,
     venue,
     opponent: isHome ? away?.name || null : home?.name || null,
-    result: scoreAvailable
-      ? (isHome
+    result: !scoreAvailable
+      ? null
+      : (isHome
           ? homeGoals > awayGoals ? "W" : homeGoals < awayGoals ? "L" : "D"
-          : awayGoals > homeGoals ? "W" : awayGoals < homeGoals ? "L" : "D")
-      : null,
+          : awayGoals > homeGoals ? "W" : awayGoals < homeGoals ? "L" : "D"),
     goalsFor: scoreAvailable ? (isHome ? homeGoals : awayGoals) : null,
-    goalsAgainst: scoreAvailable ? (isHome ? awayGoals : homeGoals) : null,
-    statisticsNormalized: []
+    goalsAgainst: scoreAvailable ? (isHome ? awayGoals : homeGoals) : null
   };
 }
 
 function summarizeHistory(teamId, matches, side) {
   const scored = matches.filter(m => m.goalsFor != null && m.goalsAgainst != null);
-  const sampleSize = scored.length;
   const wins = scored.filter(m => m.result === "W").length;
   const draws = scored.filter(m => m.result === "D").length;
   const losses = scored.filter(m => m.result === "L").length;
-  const goalsForAvg = sampleSize ? scored.reduce((s, m) => s + m.goalsFor, 0) / sampleSize : null;
-  const goalsAgainstAvg = sampleSize ? scored.reduce((s, m) => s + m.goalsAgainst, 0) / sampleSize : null;
+  const gf = scored.reduce((s, m) => s + (m.goalsFor || 0), 0);
+  const ga = scored.reduce((s, m) => s + (m.goalsAgainst || 0), 0);
   return {
-    teamId: Number(teamId),
+    teamId: Number(teamId) || null,
     side,
-    sampleSize,
+    sampleSize: scored.length,
     wins,
     draws,
     losses,
-    goalsForAvg,
-    goalsAgainstAvg,
+    goalsForAvg: scored.length ? gf / scored.length : null,
+    goalsAgainstAvg: scored.length ? ga / scored.length : null,
     matches: scored
   };
 }
 
-/**
- * @returns {{ statusCode: number, body: object }}
- */
 export async function footballDataHistory(fixtureId, env, context = {}) {
   if (!footballDataConfigured(env)) {
     return {
@@ -77,7 +73,7 @@ export async function footballDataHistory(fixtureId, env, context = {}) {
     };
   }
 
-  const resolved = await footballDataFixture(fixtureId, env, context);
+  let resolved = await footballDataFixture(fixtureId, env, context);
   if (resolved?.__rateLimited) {
     return {
       statusCode: 429,
@@ -89,13 +85,38 @@ export async function footballDataHistory(fixtureId, env, context = {}) {
       }
     };
   }
+
   if (!resolved?.id || !resolved?.home?.id || !resolved?.away?.id) {
+    const homeName = context?.home || "";
+    const awayName = context?.away || "";
+    if (homeName && awayName) {
+      const [homeTeam, awayTeam] = await Promise.all([
+        footballDataResolveTeamByName(homeName, env),
+        footballDataResolveTeamByName(awayName, env)
+      ]);
+      if (homeTeam?.id && awayTeam?.id) {
+        resolved = {
+          id: Number(fixtureId) || null,
+          name: `${homeTeam.name} vs ${awayTeam.name}`,
+          starting_at: context?.date ? `${String(context.date).slice(0, 10)}T12:00:00Z` : null,
+          state: "NS",
+          home: { id: homeTeam.id, name: homeTeam.name },
+          away: { id: awayTeam.id, name: awayTeam.name },
+          league: { name: homeTeam.competition || awayTeam.competition || null },
+          provider: "football-data",
+          __resolvedBy: "team-name-directory"
+        };
+      }
+    }
+  }
+
+  if (!resolved?.home?.id || !resolved?.away?.id) {
     return {
       statusCode: 404,
       body: {
         ok: false,
         provider: "football-data",
-        error: "football-data.org nao encontrou o fixture (use date+home+away no contexto se o ID for de outra API).",
+        error: "football-data.org nao encontrou o fixture nem os times pelo nome (ligas free apenas). Informe date+home+away de uma liga free.",
         diagnostic: { requestedId: fixtureId, context }
       }
     };
@@ -116,7 +137,7 @@ export async function footballDataHistory(fixtureId, env, context = {}) {
       body: {
         ok: false,
         provider: "football-data",
-        error: "Limite de requisicoes do football-data.org atingido no historico.",
+        error: "Limite de requisicoes do football-data.org atingido ao buscar historico dos times.",
         diagnostic: { stage: "team-matches" }
       }
     };
@@ -125,14 +146,14 @@ export async function footballDataHistory(fixtureId, env, context = {}) {
   const homeMatches = homeFetch.matches
     .map(m => normalizeFinishedMatch(m, homeId))
     .filter(m => m.goalsFor != null && m.id !== Number(resolved.id))
-    .filter(m => !m.starting_at || new Date(m.starting_at).getTime() < fixtureAt)
-    .slice(0, REQUIRED_HISTORY);
+    .filter(m => !m.date || new Date(m.date).getTime() < fixtureAt)
+    .slice(0, HISTORY_CANDIDATES);
 
   const awayMatches = awayFetch.matches
     .map(m => normalizeFinishedMatch(m, awayId))
     .filter(m => m.goalsFor != null && m.id !== Number(resolved.id))
-    .filter(m => !m.starting_at || new Date(m.starting_at).getTime() < fixtureAt)
-    .slice(0, REQUIRED_HISTORY);
+    .filter(m => !m.date || new Date(m.date).getTime() < fixtureAt)
+    .slice(0, HISTORY_CANDIDATES);
 
   if (homeMatches.length < REQUIRED_HISTORY || awayMatches.length < REQUIRED_HISTORY) {
     return {
@@ -140,11 +161,11 @@ export async function footballDataHistory(fixtureId, env, context = {}) {
       body: {
         ok: false,
         provider: "football-data",
-        error: "Historico insuficiente no football-data.org para a amostra solicitada.",
+        error: "Historico insuficiente nos times (minimo 5 jogos finalizados por lado nas ligas free).",
         diagnostic: {
           homeHistoryCount: homeMatches.length,
           awayHistoryCount: awayMatches.length,
-          requiredPerTeam: REQUIRED_HISTORY
+          resolvedBy: resolved.__resolvedBy || "fixture"
         }
       }
     };
@@ -162,8 +183,8 @@ export async function footballDataHistory(fixtureId, env, context = {}) {
     statusCode: 200,
     body: {
       ok: true,
-      version: "6.3.16",
       provider: "football-data",
+      version: "6.3.16",
       fixture: {
         id: Number(resolved.id),
         name: resolved.name,
@@ -176,14 +197,11 @@ export async function footballDataHistory(fixtureId, env, context = {}) {
       history: { home: homeHistory, away: awayHistory },
       greenScore,
       diagnostic: {
-        fixtureRequestOk: true,
-        fallbackProvider: "football-data",
         homeHistoryCount: homeMatches.length,
         awayHistoryCount: awayMatches.length,
         homeVenueCount: homeVenueMatches.length,
         awayVenueCount: awayVenueMatches.length,
-        statsFetchesUsed: 0,
-        note: "Fallback free: placares apenas (sem stats de canto/finalizacao)"
+        resolvedBy: resolved.__resolvedBy || "fixture"
       }
     }
   };
