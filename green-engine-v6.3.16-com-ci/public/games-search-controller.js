@@ -1,7 +1,6 @@
 (function () {
   "use strict";
 
-  // Same-origin no Worker e em localhost; Pages usa o Worker v6-3-15 (com API_FOOTBALL_KEY).
   const API_BASE = (typeof location !== "undefined" && (
     /^(localhost|127\.0\.0\.1)$/.test(location.hostname) ||
     /\.workers\.dev$/.test(location.hostname)
@@ -153,7 +152,7 @@
   async function loadGamesByDate() {
     const selectedDate = dateInput.value || today();
     dateInput.value = selectedDate;
-    setStatus("Pesquisando jogos (API-Football → fallback se necessário)…");
+    setStatus("Pesquisando jogos (football-data → API-Football se necessário)…");
     clearGames();
 
     try {
@@ -175,9 +174,7 @@
           /limite|rate\s*limit|too many/i.test(String(data?.error || ""));
         if (rateLimited) {
           setStatus(
-            fd.configured
-              ? "API-Football no limite. Fallback ativo, mas sem jogos nas 12 ligas free nesta data. Tente outra data (ex.: 20/09) ou aguarde a cota."
-              : "API-Football no limite de requisições. Aguarde alguns minutos."
+            "Sem jogos pendentes nas 12 ligas free (football-data) e API-Football indisponível/limite. Tente outra data (Big 5 / BR / Champions)."
           );
           clearGames();
           return;
@@ -186,12 +183,12 @@
       }
 
       const mode = String(data?.providerMode || "");
-      const viaFallback = /fallback|football-data/i.test(mode);
+      const viaFd = /football-data/i.test(mode);
       const excluded = Number(data?.meta?.beforeFilter || 0) - games.length;
-      if (viaFallback) {
-        setStatus(games.length + " jogo(s) pendente(s)/ao vivo via fallback (football-data). Encerrados ocultos.");
-      } else if (af.rateLimited && games.length) {
-        setStatus(games.length + " jogo(s) (com fallback). Encerrados ocultos.");
+      if (viaFd) {
+        setStatus(games.length + " jogo(s) via football-data (prioritário)" + (excluded > 0 ? " (" + excluded + " encerrado(s) oculto(s))" : "") + ".");
+      } else if (/api-football/i.test(mode)) {
+        setStatus(games.length + " jogo(s) via API-Football (reserva)" + (excluded > 0 ? " (" + excluded + " encerrado(s) oculto(s))" : "") + ".");
       } else {
         setStatus(games.length + " jogo(s) pendente(s)/ao vivo" + (excluded > 0 ? " (" + excluded + " encerrado(s) oculto(s))" : "") + ".");
       }
@@ -200,7 +197,7 @@
       console.error("[Green Engine] Erro na pesquisa:", error);
       const msg = error?.message || "erro de conexao";
       if (/limite|rate\s*limit|too many|429/i.test(msg)) {
-        setStatus("API-Football no limite — tente outra data com ligas free (BR/EU) ou aguarde a cota.");
+        setStatus("Nenhum jogo disponível agora — football-data (12 ligas) vazio e API-Football no limite.");
       } else {
         setStatus("Não foi possível carregar os jogos: " + msg);
       }
