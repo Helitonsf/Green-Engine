@@ -1,6 +1,6 @@
 /**
  * Provider football-data.org (free tier: 12 competições, 10 req/min).
- * Usado como fallback quando API-Football está em rate-limit.
+ * Primário no modo football-data-first.
  */
 
 const BASE = "https://api.football-data.org/v4";
@@ -112,6 +112,53 @@ function mapMatchToSportsItem(match) {
   };
 }
 
+/** Cache in-memory de times das 12 ligas free (por isolate do Worker). */
+let _teamDirectory = null;
+let _teamDirectoryLoading = null;
+
+async function loadTeamDirectory(apiKey) {
+  if (_teamDirectory) return _teamDirectory;
+  if (_teamDirectoryLoading) return _teamDirectoryLoading;
+  _teamDirectoryLoading = (async () => {
+    const teams = [];
+    for (const code of FREE_COMPETITION_CODES) {
+      const result = await apiFetch(`/competitions/${code}/teams`, apiKey);
+      if (isRateLimited(result)) break;
+      const list = Array.isArray(result.data?.teams) ? result.data.teams : [];
+      for (const t of list) {
+        if (t?.id && t?.name) {
+          teams.push({
+            id: Number(t.id),
+            name: t.name,
+            shortName: t.shortName || null,
+            tla: t.tla || null,
+            competition: code
+          });
+        }
+      }
+    }
+    _teamDirectory = teams;
+    return teams;
+  })();
+  try {
+    return await _teamDirectoryLoading;
+  } finally {
+    _teamDirectoryLoading = null;
+  }
+}
+
+export async function footballDataResolveTeamByName(name, env) {
+  const apiKey = env?.FOOTBALL_DATA_API_KEY;
+  if (!apiKey || !name) return null;
+  const teams = await loadTeamDirectory(apiKey);
+  const hit = teams.find(t =>
+    namesLooselyMatch(t.name, name) ||
+    namesLooselyMatch(t.shortName, name) ||
+    namesLooselyMatch(t.tla, name)
+  );
+  return hit || null;
+}
+
 /**
  * Jogos do dia nas competições free.
  */
@@ -125,8 +172,8 @@ export async function footballDataSports(date, env) {
   if (isRateLimited(result)) {
     return {
       data: [],
-      diagnostic: { configured: true, status: 429, errors: { rateLimit: true }, provider: "football-data" },
-      rateLimited: true
+      rateLimited: true,
+      diagnostic: { configured: true, status: result.status, count: 0, rateLimited: true, errors: result.data, provider: "football-data" }
     };
   }
   const matches = Array.isArray(result.data?.matches) ? result.data.matches : [];
@@ -137,10 +184,9 @@ export async function footballDataSports(date, env) {
       configured: true,
       status: result.status,
       count: data.length,
-      errors: result.ok ? null : result.data,
+      errors: null,
       provider: "football-data"
-    },
-    rateLimited: false
+    }
   };
 }
 
