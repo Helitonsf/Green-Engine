@@ -3,6 +3,7 @@ import { apiFootballHistory } from "../cloudflare/providers/api-football-history
 import { isAllowedLeague } from "../cloudflare/providers/league-catalog.js";
 import { footballDataConfigured, footballDataSports, footballDataFixture } from "../cloudflare/providers/football-data.js";
 import { footballDataHistory } from "../cloudflare/providers/football-data-history.js";
+import { apiFootballOdds, enrichMarketsWithOdds } from "../cloudflare/providers/api-football-odds.js";
 
 const JSON_HEADERS = { "Content-Type": "application/json; charset=utf-8" };
 const CACHE_TTL = { sports: 120, leagues: 3600, markets: 86400, fixture: 60, history: 300 };
@@ -256,6 +257,34 @@ async function fixture(url, env) {
   }, 404);
 }
 
+async function attachOddsIfPossible(body, env) {
+  try {
+    if (!body?.ok || !body?.greenScore || !apiFootballConfigured(env)) return body;
+    const fixtureId = body?.fixture?.id;
+    if (!fixtureId) return body;
+    const oddsResult = await apiFootballOdds(fixtureId, env);
+    if (oddsResult.rateLimited) {
+      body.diagnostic = { ...(body.diagnostic || {}), oddsRateLimited: true };
+      return body;
+    }
+    if (!oddsResult.ok || !oddsResult.odds) {
+      body.diagnostic = { ...(body.diagnostic || {}), oddsStatus: oddsResult.error || "unavailable" };
+      return body;
+    }
+    const { greenScore, oddsAttached, matched } = enrichMarketsWithOdds(body.greenScore, oddsResult.odds);
+    body.greenScore = greenScore;
+    body.diagnostic = {
+      ...(body.diagnostic || {}),
+      oddsAttached,
+      oddsMatched: matched,
+      oddsBookmaker: oddsResult.odds.bookmaker?.name || null
+    };
+  } catch (e) {
+    body.diagnostic = { ...(body.diagnostic || {}), oddsError: String(e?.message || e) };
+  }
+  return body;
+}
+
 async function history(url, env) {
   const fixtureId = url.searchParams.get("fixture");
   if (!fixtureId || !/^\d+$/.test(fixtureId)) return json({ error: "Informe um fixture ID numerico." }, 400);
@@ -273,14 +302,16 @@ async function history(url, env) {
   if (tryPrimary && preferred !== "football-data" && apiFootballConfigured(env)) {
     const result = await apiFootballHistory(fixtureId, env, context);
     if (result.statusCode === 200) {
-      return json(result.body, 200);
+      const body = await attachOddsIfPossible(result.body, env);
+      return json(body, 200);
     }
     const is429 = result.statusCode === 429 || /limite de requisicoes|rate\s*limit/i.test(String(result.body?.error || ""));
     if (is429 && tryFallback && footballDataConfigured(env)) {
       const fd = await footballDataHistory(fixtureId, env, context);
       if (fd.statusCode === 200) {
         fd.body.diagnostic = { ...(fd.body.diagnostic || {}), fallbackFrom: "api-football-rate-limit" };
-        return json(fd.body, 200);
+        const body = await attachOddsIfPossible(fd.body, env);
+        return json(body, 200);
       }
       return json({
         ok: false,
@@ -295,6 +326,10 @@ async function history(url, env) {
 
   if (tryFallback && footballDataConfigured(env)) {
     const fd = await footballDataHistory(fixtureId, env, context);
+    if (fd.statusCode === 200) {
+      const body = await attachOddsIfPossible(fd.body, env);
+      return json(body, 200);
+    }
     return json(fd.body, fd.statusCode);
   }
 
@@ -320,7 +355,7 @@ export default {
     else if (url.pathname === "/api/markets") response = await withCache(request, ctx, CACHE_TTL.markets, () => markets(env));
     else if (url.pathname === "/api/fixture") response = await withCache(request, ctx, CACHE_TTL.fixture, () => fixture(url, env));
     else if (url.pathname === "/api/history") response = await withCache(request, ctx, CACHE_TTL.history, () => history(url, env));
-    else if (url.pathname === "/health") response = json({ ok: true, service: "green-engine-v6.3.16", timezone: "America/Sao_Paulo", leagueFilter: "curated", providers: { apiFootball: apiFootballConfigured(env), footballData: footballDataConfigured(env) }, providerMode: "auto-fallback" }, 200);
+    else if (url.pathname === "/health") response = json({ ok: true, service: "green-engine-v6.3.16", timezone: "America/Sao_Paulo", leagueFilter: "curated", providers: { apiFootball: apiFootballConfigured(env), footballData: footballDataConfigured(env) }, providerMode: "auto-fallback", odds: "api-football-/odds" }, 200);
     else if (env.ASSETS) {
       return env.ASSETS.fetch(request);
     } else {
